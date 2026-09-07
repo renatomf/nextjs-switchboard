@@ -148,6 +148,16 @@ export const runWorkflowTask = task({
 
         try {
           outputs[id] = await executor({ values, getStagehand })
+          // Logged per node, not just returned at the end. A run that throws
+          // returns no output at all, so without this every result the run did
+          // produce before it broke is lost. It also lands each result on the
+          // trace timeline right after the Stagehand logs for the step that
+          // produced it, which is where you read it when there is no session
+          // recording to inspect.
+          logger.log(`Step output: ${node.data.title}`, {
+            nodeId: id,
+            output: outputs[id],
+          })
         } catch (error) {
           setStatus(id, "failed")
           // A thrown run returns no output, so this flush is the only way the
