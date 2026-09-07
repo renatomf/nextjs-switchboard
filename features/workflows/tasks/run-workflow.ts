@@ -1,10 +1,6 @@
 import toposort from "toposort"
 import { logger, metadata, task } from "@trigger.dev/sdk"
-import {
-  browserbase,
-  Stagehand,
-  type StagehandBrowser,
-} from "@browserbasehq/stagehand"
+import { Stagehand } from "@browserbasehq/stagehand"
 import { nodeExecutors } from "@/features/workflows/nodes/node-executors"
 import { interpolate } from "@/features/workflows/lib/interpolate"
 import { getWorkflow } from "@/features/workflows/data"
@@ -21,6 +17,13 @@ export type RunStep = {
 // executor from the registry.
 export const runWorkflowTask = task({
   id: "run-workflow",
+  // The project default is 3 attempts, which is wrong for this task: an attempt
+  // re-runs the whole graph from the first node against a brand new Browserbase
+  // session, so a failure in the last step pays for every step before it three
+  // times over — three sessions, three times the model calls. The failures that
+  // actually happen here (a bad instruction, a retired model, an exhausted quota)
+  // are not the kind a retry fixes. One attempt, and the run reports what broke.
+  retry: { maxAttempts: 1 },
   run: async ({ workflowId, orgId }: { workflowId: string; orgId: string }) => {
     const workflow = await getWorkflow(orgId, workflowId)
     if (!workflow?.graph) throw new Error(`Workflow ${workflowId} has no graph`)
@@ -76,7 +79,6 @@ export const runWorkflowTask = task({
 
     // The run owns one Browserbase session, opened lazily on the first browser
     // step and reused by every later one, so the recording spans the whole flow.
-    let browser: StagehandBrowser | undefined
     let stagehand: Stagehand | undefined
     // The Browserbase session id, captured the moment the session opens so it can
     // be returned in the run's output — a panel reads it there to fetch the replay
@@ -89,20 +91,33 @@ export const runWorkflowTask = task({
       const apiKey = process.env.BROWSERBASE_API_KEY
       if (!apiKey) throw new Error("BROWSERBASE_API_KEY is not set")
 
-      // v4 splits what v3's constructor did: a factory opens the session, then
-      // Stagehand.create() attaches to it (the constructor itself is private).
-      browser = await browserbase.launch({ apiKey })
-      browserbaseSessionId = browser.sessionId
+      // Overridable so a model can be swapped without a code change — model
+      // availability moves fast, and a retired or overloaded one is a config
+      // problem, not a code one.
+      const modelName = process.env.STAGEHAND_MODEL ?? "google/gemini-3.5-flash"
+      // Sending a key of your own is what keeps inference off the shared free-tier
+      // path, which is where "quota exceeded" (limit 20) and "this model is
+      // experiencing high demand" come from. A plain string means "no key", so
+      // only widen the config to an object when there is one to pass.
+      const modelApiKey = process.env.GEMINI_API_KEY
+
+      stagehand = new Stagehand({
+        // Runs the session on Browserbase rather than a local Chrome, and routes
+        // act/extract/observe through their API — which is also what makes the
+        // run show up under the session's Stagehand tab in the dashboard.
+        env: "BROWSERBASE",
+        apiKey,
+        model: modelApiKey ? { modelName, apiKey: modelApiKey } : modelName,
+        // Pino's logging backend spawns a thread-stream worker (lib/worker.js)
+        // that can't be resolved inside trigger.dev's bundled output. Disable it —
+        // the option exists for exactly these minimal/bundled environments.
+        disablePino: true,
+      })
+
+      await stagehand.init()
+      browserbaseSessionId = stagehand.browserbaseSessionID
       logger.log("Started Browserbase session", { browserbaseSessionId })
 
-      // The same Browserbase key again, this time as the Stagehand API key — it's
-      // what unlocks the managed services, so the LLM routes through Browserbase's
-      // Model Gateway and no separate provider key is needed.
-      stagehand = await Stagehand.create({
-        browser,
-        apiKey,
-        model: { modelName: "google/gemini-2.5-flash" },
-      })
       return stagehand
     }
 
@@ -144,11 +159,17 @@ export const runWorkflowTask = task({
         setStatus(id, "done")
       }
     } finally {
+      // Closing releases the Browserbase session; there is no separate browser
+      // handle in v3, so this one call is the whole cleanup.
       await stagehand?.close()
     }
 
     // Returned as well as published: a completed run's output is guaranteed to
     // carry the finished state even if the last metadata flush is missed.
-    return { steps }
+    //
+    // outputs rides along so what each node actually produced — the page title, an
+    // extraction — is readable after the run instead of only being interpolation
+    // fuel that dies with the worker.
+    return { steps, outputs }
   },
 })

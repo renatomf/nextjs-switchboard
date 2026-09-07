@@ -4,6 +4,19 @@
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 <!-- END:nextjs-agent-rules -->
 
+# Adding a workflow node
+
+Three edits, all under `features/workflows/nodes/`:
+
+1. the impl file (e.g. `open-url.ts`) — the node's executor logic,
+2. register it in `node-executors.ts` — the `satisfies` contract makes a missing
+   executor a compile error for action nodes,
+3. add its manifest entry in `node-registry.ts` — kind, label, icon, accent, its
+   input `fields`, and the `outputs` downstream nodes can reference.
+
+The run task and the canvas step node are registry-driven — never touch them to add
+a node.
+
 # React Flow
 
 Do not write React Flow (`@xyflow/react`) code from memory — the API has moved (package rename, `reactflow` -> `@xyflow/react`, v11 -> v12 hook/prop/type changes) and training data is unreliable here. Before adding or changing anything that touches React Flow — components, hooks, node/edge types, handles, props, styling, or provider setup — fetch https://reactflow.dev/llms.txt and follow its links to the specific docs pages for the APIs in question, then implement from what the docs actually say. Same rule when debugging React Flow behavior: check the current docs before guessing.
@@ -22,297 +35,237 @@ Never write a raw `'`, `"`, `<`, or `>` in JSX text content — `react/no-unesca
 This project has Trigger.dev agent skills installed in `.agents/skills/`. Before writing or changing Trigger.dev code (background tasks, scheduled tasks, realtime, or chat.agent AI agents), load the most relevant skill: `trigger-authoring-chat-agent`, `trigger-authoring-tasks`, `trigger-chat-agent-advanced`, `trigger-cost-savings`, `trigger-getting-started`, `trigger-realtime-and-frontend`.
 <!-- TRIGGER.DEV SKILLS END -->
 
-
 # Stagehand Project
 
-This is a project that uses Stagehand v4, a browser automation framework with AI-powered `act`, `extract`, and `observe` methods.
+This project uses **Stagehand v3** (`^3.6.0`), a browser automation framework with
+AI-powered `act`, `extract`, and `observe` methods. The main class is imported as
+`Stagehand` from `@browserbasehq/stagehand`.
 
-The main class can be imported as `Stagehand` from `@browserbasehq/stagehand`.
+**Do not write Stagehand code from memory.** v4 exists and reads very differently —
+`browserbase.launch()`, `Stagehand.create()`, every result wrapped in
+`{ data, metadata }`, no `agent` API, `await page.url()`. None of that applies
+here. This project is pinned to v3 deliberately. When unsure, read the typings in
+`node_modules/@browserbasehq/stagehand/dist/cjs/lib/v3/` — they are the most
+reliable reference for this version.
 
-**Key Classes:**
+**Key surfaces:**
 
-- `Stagehand`: Main orchestrator class providing `act`, `extract`, and `observe` methods
-- `browser.context`: A `BrowserContext` object that manages pages, cookies, and the clipboard
-- `page`: Individual page objects accessed via `browser.context.activePage()`, `browser.context.pages()`, or created with `browser.context.newPage()`
-
-There is no `agent` API in v4. Compose `observe`, `act`, and `extract` in your own control flow instead.
+- `Stagehand` — the orchestrator, built with `new` and then `init()`ed. Carries
+  `act`, `extract`, `observe`, and `agent`
+- `stagehand.context` — the CDP-backed context owning pages, cookies, clipboard
+- `stagehand.context.pages()` — top-level pages, oldest first. Also
+  `activePage()` and `newPage(url?)`
 
 ## Initialize
 
 ```typescript
-import { browserbase, localBrowser, Stagehand } from "@browserbasehq/stagehand";
+import { Stagehand } from "@browserbasehq/stagehand"
 
-const browser = await localBrowser.launch({ headless: true });
-const stagehand = await Stagehand.create({
-  browser,
-  model: {
-    modelName: "openai/gpt-5.4-mini",
-    apiKey: process.env.OPENAI_API_KEY,
-  },
-  logging: { level: "info", format: "pretty" },
-});
+const stagehand = new Stagehand({
+  env: "BROWSERBASE",
+  apiKey: process.env.BROWSERBASE_API_KEY!,
+  model: "google/gemini-3.5-flash",
+  // Pino's logging backend spawns a thread-stream worker (lib/worker.js) that
+  // cannot be resolved inside a bundled environment such as trigger.dev's output.
+  disablePino: true,
+})
 
-// Access the browser context and pages
-const [page] = await browser.context.pages();
-const context = browser.context;
+await stagehand.init()
 
-// Create new pages if needed
-const page2 = await browser.context.newPage();
+const page = stagehand.context.pages()[0]
 ```
 
-For Browserbase cloud browsers, pass the Browserbase API key to `browserbase.launch()`:
+`init()` is what launches the session — nothing works before it resolves. With
+`env: "BROWSERBASE"` the session runs in the cloud and act/extract/observe route
+through the Stagehand API, which is also what makes the run appear under the
+session's Stagehand tab in the Browserbase dashboard. `env: "LOCAL"` runs a local
+Chrome instead.
 
-```typescript
-const browser = await browserbase.launch({
-  apiKey: process.env.BROWSERBASE_API_KEY,
-});
-const stagehand = await Stagehand.create({
-  browser,
-  model: { modelName: "openai/gpt-5.4-mini", apiKey: process.env.OPENAI_API_KEY },
-});
-```
+After `init()`, `stagehand.browserbaseSessionID` holds the session id — capture it
+if you need to link to the replay later.
 
-Stagehand never reads environment variables for you. Always pass keys explicitly.
+Stagehand does fall back to reading `BROWSERBASE_API_KEY` and
+`BROWSERBASE_PROJECT_ID` from the environment, but pass keys explicitly anyway so
+the dependency is visible at the call site.
 
 ## Act
 
-Actions are called on the `stagehand` instance (not the page). `act` takes either a string instruction or an `Action` from `observe`. Use atomic, specific instructions:
+Actions are called on the `stagehand` instance, not on the page:
 
 ```typescript
-// Act on the current active page
-await stagehand.act("click the sign in button");
+const result = await stagehand.act("click the sign in button")
 
-// Act on a specific page (when you need to target a page that isn't currently active)
-await stagehand.act("click the sign in button", { page: page2 });
+console.log(result.success, result.message)
 ```
 
-**Important:** Act instructions should be atomic and specific:
+The result comes back directly — `{ success, message, actionDescription, actions }`.
+There is no `data` wrapper.
+
+**Instructions must be atomic and specific:**
 
 - Good: "Click the sign in button" or "Type 'hello' into the search input"
 - Bad: "Order me pizza" or "Type in the search bar and hit enter" (multi-step)
 
-Use `variables` for secrets. Values are substituted locally and never sent to the model:
+`act` resolves whether or not the model managed the action — a failure returns
+`success: false` rather than throwing. Check the flag; do not rely on try/catch.
+
+Use `variables` for secrets. Values are substituted locally and never sent to the
+model:
 
 ```typescript
 await stagehand.act("type %password% into the password field", {
   variables: { password: process.env.USER_PASSWORD },
-});
+})
 ```
 
 ### Observe Then Act Pattern (Recommended)
 
-`act` accepts either a string instruction or an `Action` returned by `observe`. Use `observe` to inspect the candidate action, then pass it back to `act` for deterministic replay with no inference:
+`act` accepts either a string or an `Action` returned by `observe`. Observe first
+to inspect the candidate, then pass it back for deterministic replay with no
+inference:
 
 ```typescript
-const { data: actions } = await stagehand.observe("Click the sign in button");
-const [action] = actions;
-
-if (action?.method === "click") {
-  await stagehand.act(action);
-}
-```
-
-To target a specific page:
-
-```typescript
-const { data: actions } = await stagehand.observe("select blue as the favorite color", {
-  page: page2,
-});
-const [action] = actions;
+const [action] = await stagehand.observe("Click the sign in button")
 
 if (action) {
-  await stagehand.act(action, { page: page2 });
+  await stagehand.act(action)
 }
 ```
 
 ## Extract
 
-Extract data from pages using natural language instructions. The `extract` method is called on the `stagehand` instance and always takes both an instruction and a schema.
-
-Every primitive returns `{ data, metadata }`. Your extracted value is on `data`; `metadata` carries the action ID and server-side cache status.
-
-### Basic Extraction (with schema)
+Four forms, and the one you pick decides the return shape:
 
 ```typescript
-import { z } from "zod/v4";
+// No instruction — the whole page as text: { pageText: string }
+const { pageText } = await stagehand.extract()
 
-const { data } = await stagehand.extract(
+// Instruction only — the default schema: { extraction: string }
+const { extraction } = await stagehand.extract("extract the sign in button text")
+
+// Instruction plus schema — your shape, inferred
+const { listings } = await stagehand.extract(
   "extract all apartment listings with prices and addresses",
   z.object({
-    listings: z.array(
-      z.object({
-        price: z.string(),
-        address: z.string(),
-      }),
-    ),
+    listings: z.array(z.object({ price: z.string(), address: z.string() })),
   }),
-);
-
-console.log(data.listings);
+)
 ```
 
-### Simple Extraction
+The extracted value is returned directly, not under `data`. A schema is optional;
+without one you get a single `extraction` string.
 
-A schema is always required, so wrap single values in an object:
+### URL Extraction
+
+When extracting links, use `z.string().url()`:
 
 ```typescript
-const { data } = await stagehand.extract(
-  "extract the sign in button text",
-  z.object({ buttonText: z.string() }),
-);
-
-console.log(data.buttonText); // "Sign in"
+const { links } = await stagehand.extract(
+  "extract all navigation links",
+  z.object({ links: z.array(z.string().url()) }),
+)
 ```
 
 ### Targeted Extraction
 
-Scope extraction to a specific element with `locator`, and prune noise with `ignoreLocators`:
+Scope with `selector`, prune noise with `ignoreSelectors`:
 
 ```typescript
-const { data } = await stagehand.extract(
+const { reason } = await stagehand.extract(
   "extract the reason why script injection fails",
   z.object({ reason: z.string() }),
-  {
-    locator: page.locator("#main-content"),
-    ignoreLocators: [page.locator("nav"), page.locator(".cookie-banner")],
-  },
-);
-```
-
-### URL Extraction
-
-When extracting links or URLs, use `z.url()`:
-
-```typescript
-const { data } = await stagehand.extract(
-  "extract all navigation links",
-  z.object({
-    links: z.array(z.url()),
-  }),
-);
-```
-
-### Extracting from a Specific Page
-
-```typescript
-const { data } = await stagehand.extract(
-  "extract the placeholder text on the name field",
-  z.object({ placeholder: z.string() }),
-  { page: page2 },
-);
-```
-
-### Inspecting Metadata
-
-```typescript
-const TitleSchema = z.object({ title: z.string() });
-
-const result = await stagehand.extract("extract the page title", TitleSchema);
-
-console.log(result.data.title);
-console.log(result.metadata.actionId); // Action ID for tracing this call
-console.log(result.metadata.cache.status); // "HIT", "MISS", or "DISABLED"
+  { selector: "#main-content", ignoreSelectors: ["nav", ".cookie-banner"] },
+)
 ```
 
 ## Observe
 
-Plan actions before executing them. Candidate actions are returned on `data`:
+Plan actions before executing them. Candidates come back as a plain array:
 
 ```typescript
-// Get candidate actions on the current active page
-const { data: actions } = await stagehand.observe("Click the sign in button");
-const [action] = actions;
+const actions = await stagehand.observe("Click the sign in button")
 
-if (action) {
-  console.log(action.selector, action.method, action.arguments);
+for (const action of actions) {
+  console.log(action.selector, action.description)
 }
 ```
 
-Observing on a specific page:
+## Agent
+
+v3 ships an agent that runs its own multi-step loop, for goals too broad for a
+single `act`:
 
 ```typescript
-const { data: actions } = await stagehand.observe("find the next page button", {
-  page: page2,
-});
-await stagehand.act(actions[0], { page: page2 });
+const result = await stagehand.agent().execute("find the cheapest flight to Lisbon")
+
+console.log(result.success, result.message, result.completed)
 ```
 
-## Advanced Features
+Reach for it only when the steps genuinely have to be decided at run time. A known
+sequence is cheaper and far more predictable written as explicit `act` calls.
 
-### Locators
-
-Use `page.locator(selector)` for deterministic, non-AI interactions. Selectors returned by `observe` are XPath strings prefixed with `xpath=`:
+## Pages
 
 ```typescript
-await page.locator("xpath=/html/body/div[2]/button").click();
-await page.locator("#email").fill("user@example.com");
-const count = await page.locator("li.result").count();
+const page = stagehand.context.pages()[0]
+
+await page.goto("https://example.com", { waitUntil: "load", timeoutMs: 30_000 })
+
+const url = page.url() // synchronous — cached from navigation events
+const title = await page.title() // async
+
+const second = await stagehand.context.newPage("https://example.com/pricing")
 ```
 
-### Multi-Page Workflows
+Two details that trip up v4-trained code: the navigation option is `timeoutMs`,
+not `timeout`, and `url()` is synchronous — awaiting it is harmless but wrong, and
+a reliable sign the code was written against the wrong version.
+
+Target a specific page through the options:
 
 ```typescript
-const page1 = await browser.context.newPage("https://example.com");
-
-const page2 = await browser.context.newPage("https://example2.com");
-
-// Act/extract/observe operate on the current active page by default
-// Pass { page } option to target a specific page
-await stagehand.act("click button", { page: page1 });
-await stagehand.extract("get title", z.object({ title: z.string() }), { page: page2 });
-```
-
-### Caching
-
-Server-side caching requires a Browserbase browser and a Browserbase API key:
-
-```typescript
-const browser = await browserbase.launch({
-  apiKey: process.env.BROWSERBASE_API_KEY,
-});
-const stagehand = await Stagehand.create({
-  browser,
-  cache: true, // or { threshold: 1 }
-});
+await stagehand.act("click the buy button", { page: second })
 ```
 
 ## Cleanup
 
-Close Stagehand before closing its browser:
+`close()` releases the Browserbase session. There is no separate browser handle in
+v3 — this one call is the whole cleanup:
 
 ```typescript
+const stagehand = new Stagehand({ env: "BROWSERBASE", apiKey, disablePino: true })
+
 try {
-  const stagehand = await Stagehand.create({ browser });
-  try {
-    // ...
-  } finally {
-    await stagehand.close();
-  }
+  await stagehand.init()
+  // ...
 } finally {
-  await browser.close();
+  await stagehand.close()
 }
 ```
 
 ## Project Structure Best Practices
 
-- Read configuration from environment variables and pass it explicitly to the `Stagehand` constructor
-- Create the browser first, pass it to `Stagehand.create()`, then pass the instance into your automation functions
-- Use `async`/`await` consistently; `create`, `act`, `extract`, `observe`, and `close` all return promises
-- Keep Zod schemas next to the code that consumes them and reuse `z.infer` for the decoded type
+- Read configuration from environment variables and pass it explicitly to the
+  constructor
+- Always `await stagehand.init()` before touching pages or calling act/extract
 - Wrap every workflow in `try`/`finally` so `close` runs even when a step throws
-- Prefer narrow, atomic instructions over one instruction that describes a whole workflow
+- Keep Zod schemas next to the code that consumes them and reuse `z.infer` for the
+  decoded type
+- Prefer narrow, atomic instructions over one instruction describing a whole flow
 
 ## Security Notes
 
-- Never hard-code API keys. Read them from `process.env` and pass them explicitly; Stagehand reads no environment variables for you
-- Pass secrets through `variables` so they are substituted locally and never sent to the model provider
-- Set `logging: { level: "off" }` when handling sensitive data so nothing sensitive reaches your logs
-- Avoid broad instructions that may trigger unintended navigation; call `observe` first, then replay the returned `Action`
+- Never hard-code API keys. Read them from `process.env` and pass them explicitly
+- Pass secrets through `variables` so they are substituted locally and never reach
+  the model provider
+- Set `verbose: 0` when handling sensitive data so nothing sensitive is logged
+- Avoid broad instructions that may trigger unintended navigation; call `observe`
+  first, then replay the returned `Action`
 
 ## Resources/References
 
-- TypeScript SDK: `@browserbasehq/stagehand` on npm
-- Stagehand documentation: https://docs.stagehand.dev
-- Stagehand Docs MCP (Mintlify): https://docs.stagehand.dev/mcp
-- Context7 MCP (Upstash): https://github.com/upstash/context7
-- DeepWiki MCP: https://mcp.deepwiki.com/
+- TypeScript SDK: `@browserbasehq/stagehand` on npm, pinned to `^3.6.0`
+- Local typings, the reference of record for this version:
+  `node_modules/@browserbasehq/stagehand/dist/cjs/lib/v3/`
+- Stagehand documentation: https://docs.stagehand.dev — defaults to v4, so check
+  the version selector before copying anything
