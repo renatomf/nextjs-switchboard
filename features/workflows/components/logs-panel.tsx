@@ -203,6 +203,9 @@ function ReplayRow({
 function RunHeader({ run }: { run: WorkflowRun }) {
   return (
     <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-border bg-background px-2 py-1.5">
+      <span className="text-xs text-muted-foreground">
+        {run.createdAt.toLocaleTimeString()}
+      </span>
       <Badge
         variant={
           run.isFailed ? "destructive" : run.isLive ? "secondary" : "outline"
@@ -211,9 +214,6 @@ function RunHeader({ run }: { run: WorkflowRun }) {
         {run.isLive && <Spinner className="size-3" />}
         {run.status.toLowerCase().replace(/_/g, " ")}
       </Badge>
-      <span className="text-xs text-muted-foreground">
-        {run.createdAt.toLocaleTimeString()}
-      </span>
       {/* Zero until the run actually starts, which reads as a suspiciously fast
           run rather than as one that has not begun. */}
       {run.durationMs > 0 && (

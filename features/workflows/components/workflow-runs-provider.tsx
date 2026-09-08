@@ -1,6 +1,12 @@
 "use client"
 
-import { createContext, useContext, useEffect, useMemo, type ReactNode } from "react"
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  type ReactNode,
+} from "react"
 import * as Sentry from "@sentry/nextjs"
 import { useRealtimeRunsWithTag } from "@trigger.dev/react-hooks"
 
@@ -111,6 +117,26 @@ function toWorkflowRun(run: WorkflowRuns["runs"][number]): WorkflowRun {
   // still-running run should read as.
   const browserbaseSessionId = run.output?.browserbaseSessionId
 
+  // Stopping a run is not a failure and must not read as one. The step that was
+  // in flight when the stop landed still writes itself as failed on its way out
+  // — the executor's catch sees the abort like any other throw — so it goes back
+  // to "running": started, never settled. The message it wrote goes with it,
+  // since there is no error here to report. Everything behind it is already
+  // "pending", which is the same thing one step earlier.
+  //
+  // Ahead of the repair below, which is deliberately not applied to a stopped
+  // run: isFailed excludes CANCELED, so the two never both fire, and painting
+  // the interrupted step red is exactly what this is undoing.
+  if (run.isCancelled) {
+    const stopped = steps.map((step) =>
+      step.status === "failed"
+        ? { ...step, status: "running" as const, error: undefined }
+        : step
+    )
+
+    return { ...run, steps: stopped, isLive, browserbaseSessionId }
+  }
+
   // A failed run's own "failed" step write is the last thing it does before
   // throwing, and it can be lost — a dropped flush, a killed worker, a timeout.
   // The run status is what always arrives, and steps run strictly in order, so
@@ -172,4 +198,12 @@ export function useLatestRunSteps(): { steps: RunStep[]; isLive: boolean } {
 
     return { steps: latest.steps, isLive: latest.isLive }
   }, [runs])
+}
+
+// The run that is still going, if there is one. A workflow has at most one live
+// run at a time, so this is the run a Stop button has to cancel.
+export function useLiveRun(): WorkflowRun | undefined {
+  const { runs } = useRunHistory()
+
+  return useMemo(() => runs.find((run) => run.isLive), [runs])
 }

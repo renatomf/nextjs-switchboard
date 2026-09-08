@@ -14,6 +14,7 @@ import {
   nodeRegistry,
   type NodeDefinition,
 } from "@/features/workflows/nodes/node-registry"
+import type { RunStep } from "@/features/workflows/tasks/run-workflow"
 
 interface InspectorPanelProps {
   selected: ConsoleSelection
@@ -70,6 +71,25 @@ function ReplayInspector({ run }: { run: WorkflowRun }) {
   )
 }
 
+// The line to show where a result would be, for a step that has none. The step's
+// own status is the whole of it: started but not settled reads as waiting, and
+// never started reads as not run yet.
+function emptyNote(step: RunStep) {
+  if (step.status === "skipped") {
+    return "This is where the run starts, not a step it executes — there is nothing to show."
+  }
+
+  if (step.status === "running") {
+    return "Waiting for this step to finish…"
+  }
+
+  if (step.status === "pending") {
+    return "This step hasn't run yet."
+  }
+
+  return "This step produced no output."
+}
+
 // What the selected step produced: its output as formatted JSON, its error when
 // it failed, or a note when there is neither.
 function StepInspector({ run, nodeId }: { run: WorkflowRun; nodeId: string }) {
@@ -94,12 +114,14 @@ function StepInspector({ run, nodeId }: { run: WorkflowRun; nodeId: string }) {
   return (
     <div className="flex size-full min-w-0 flex-col">
       <div className="flex items-center gap-2 border-b border-border px-3 py-1.5">
+        {/* Always the node's own icon, never the spinner the log row swaps in:
+            this header names what is being shown below it, and the pane already
+            says the step is still going where its result would be. */}
         {def && (
           <NodeIcon
             type={step.nodeType}
             className="size-5"
             iconClassName="size-3"
-            running={step.status === "running"}
           />
         )}
         <span className="truncate text-xs font-semibold">
@@ -121,17 +143,8 @@ function StepInspector({ run, nodeId }: { run: WorkflowRun; nodeId: string }) {
           <pre className="p-3 font-mono text-xs break-words whitespace-pre-wrap">
             {JSON.stringify(step.output, null, 2)}
           </pre>
-        ) : step.status === "skipped" ? (
-          <Note>
-            This is where the run starts, not a step it executes — there is
-            nothing to show.
-          </Note>
-        ) : step.status === "pending" ? (
-          <Note>This step never ran.</Note>
-        ) : step.status === "running" ? (
-          <Note>Still running&hellip;</Note>
         ) : (
-          <Note>This step produced no output.</Note>
+          <Note>{emptyNote(step)}</Note>
         )}
       </div>
     </div>

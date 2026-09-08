@@ -3,7 +3,7 @@
 import { useRef, useState, useTransition, type FocusEvent } from "react"
 import { useRouter } from "next/navigation"
 import * as Sentry from "@sentry/nextjs"
-import { Lock, MoreHorizontal, Play, Trash2 } from "lucide-react"
+import { Lock, MoreHorizontal, Play, Square, Trash2 } from "lucide-react"
 import { useReactFlow, useStore } from "@xyflow/react"
 import { toast } from "sonner"
 
@@ -25,13 +25,17 @@ import { Label } from "@/components/ui/label"
 import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
-import { WorkflowRunStatus } from "@/features/workflows/components/workflow-run-status"
 
 import {
+  cancelWorkflowRunAction,
   deleteWorkflowAction,
   runWorkflowAction,
 } from "@/features/workflows/actions"
 import { NodeIcon } from "@/features/workflows/components/node-icon"
+import {
+  useLiveRun,
+  useRunHistory,
+} from "@/features/workflows/components/workflow-runs-provider"
 import { useProPlan } from "@/features/workflows/hooks/use-pro-plan"
 import { useUpstreamConnections } from "@/features/workflows/hooks/use-upstream-connections"
 import { validateGraph } from "@/features/workflows/lib/validate-graph"
@@ -46,7 +50,7 @@ import {
 } from "@/features/workflows/nodes/node-registry"
 
 // This file builds up to the RightSidebar component exported at the bottom: a
-// header with workflow actions (delete, run), then two tabs — a Toolbar for
+// header with workflow actions (delete, run/stop), then two tabs — a Toolbar for
 // adding nodes and an Editor for tweaking the selected node. Each helper below is
 // defined just above the block that uses it.
 
@@ -419,9 +423,10 @@ interface RunHandle {
   publicAccessToken: string
 }
 
-// Kicks off a run of the current workflow, handing the handle back to the
-// sidebar so it can show the run's live status.
-function RunButton({
+// The header's run control: it starts a run of the current workflow, handing
+// the handle back to the sidebar so it can show the run's live status, and
+// while that run is going it turns into the Stop button that cancels it.
+function RunControl({
   workflowId,
   onStarted,
 }: {
@@ -430,6 +435,18 @@ function RunButton({
 }) {
   const { getNodes, getEdges } = useReactFlow<StepNodeType>()
   const [isPending, startTransition] = useTransition()
+  // A workflow has at most one run going at a time, so this is the run Stop
+  // has to cancel — including one started before this page was opened.
+  const liveRun = useLiveRun()
+  const { runs } = useRunHistory()
+  // The run this button just started. The realtime subscription needs a moment
+  // to report it, and without holding it the button would flash back to Run in
+  // that gap — long enough to start a second run of the same workflow.
+  const [startedId, setStartedId] = useState<string | null>(null)
+  const settling =
+    startedId !== null && !runs.some((run) => run.id === startedId)
+
+  const activeRunId = liveRun?.id ?? (settling ? startedId : null)
 
   const handleRun = () => {
     const graph = { nodes: getNodes(), edges: getEdges() }
@@ -450,7 +467,10 @@ function RunButton({
 
     startTransition(async () => {
       try {
-        onStarted(await runWorkflowAction({ id: workflowId, graph }))
+        const handle = await runWorkflowAction({ id: workflowId, graph })
+
+        setStartedId(handle.id)
+        onStarted(handle)
       } catch (error) {
         Sentry.logger.error("Workflow run failed to start", {
           workflowId,
@@ -468,6 +488,45 @@ function RunButton({
         toast.error("Failed to start workflow run")
       }
     })
+  }
+
+  const handleStop = () => {
+    if (!activeRunId) return
+
+    startTransition(async () => {
+      try {
+        await cancelWorkflowRunAction(activeRunId)
+      } catch (error) {
+        // Cancelling is the user's way out of a run that is misbehaving, so a
+        // failure here leaves them stuck — worth a report, not just a toast.
+        Sentry.logger.error("Workflow run failed to cancel", {
+          workflowId,
+          runId: activeRunId,
+        })
+        Sentry.captureException(error, {
+          tags: { action: "cancel-workflow-run" },
+          extra: { workflowId, runId: activeRunId },
+        })
+        toast.error("Failed to stop workflow run")
+      }
+    })
+  }
+
+  // The button the run itself decides: nothing running means Run, and a run in
+  // flight means the only thing left to do is stop it. The cancelled run turns
+  // up as not-live on the subscription, which flips this back on its own.
+  if (activeRunId) {
+    return (
+      <Button
+        size="sm"
+        variant="destructive"
+        disabled={isPending}
+        onClick={handleStop}
+      >
+        {isPending ? <Spinner /> : <Square />}
+        Stop
+      </Button>
+    )
   }
 
   return (
@@ -512,17 +571,8 @@ export function RightSidebar({ workflowId }: { workflowId: string }) {
       <Tabs value={tab} onValueChange={setTab} className="size-full gap-0">
         <div className="flex items-center justify-between border-b border-border p-2">
           <ActionsMenu workflowId={workflowId} />
-          <RunButton workflowId={workflowId} onStarted={setHandle} />
+          <RunControl workflowId={workflowId} onStarted={setHandle} />
         </div>
-        {handle && (
-          <div className="border-b border-border p-2">
-            <WorkflowRunStatus
-              key={handle.id}
-              runId={handle.id}
-              publicAccessToken={handle.publicAccessToken}
-            />
-          </div>
-        )}
         <TabsList className="m-2 w-fit bg-background">
           <TabsTrigger value="toolbar" className={tabTriggerClassName}>
             Toolbar
