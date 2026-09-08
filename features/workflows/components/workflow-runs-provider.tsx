@@ -56,55 +56,92 @@ function useWorkflowRuns() {
   const value = useContext(WorkflowRunsContext)
 
   if (!value) {
-    throw new Error("useWorkflowRuns must be used inside a WorkflowRunsProvider")
+    throw new Error(
+      "useWorkflowRuns must be used inside a WorkflowRunsProvider"
+    )
   }
 
   return value
 }
 
+// One run as the console reads it: everything Trigger.dev reports about the run
+// itself, plus the steps resolved out of wherever that particular run left them.
+export type WorkflowRun = WorkflowRuns["runs"][number] & {
+  steps: RunStep[]
+  isLive: boolean
+}
+
+function toWorkflowRun(run: WorkflowRuns["runs"][number]): WorkflowRun {
+  // The run carries its own booleans, derived from the same status mapping the
+  // SDK uses, so the canvas never has to keep its own list of status strings in
+  // sync with the ones Trigger.dev happens to send.
+  const isLive = run.isQueued || run.isExecuting || run.isWaiting
+
+  // The task returns its final steps on success, which is the authoritative
+  // finished state; metadata is the live view while the run is still going (and
+  // the only place a failed run's steps ever land, since it returns no output).
+  const steps =
+    run.output?.steps ?? (run.metadata?.steps as RunStep[] | undefined) ?? []
+
+  // A failed run's own "failed" step write is the last thing it does before
+  // throwing, and it can be lost — a dropped flush, a killed worker, a timeout.
+  // The run status is what always arrives, and steps run strictly in order, so
+  // the first step that never reached "done" is where the run stopped. Marking
+  // it is what puts the red border on the node that actually broke.
+  //
+  // Skipped steps are passed over here: the trigger is never executed, so it is
+  // never what a run broke on, and it sits ahead of every real step.
+  //
+  // A step repaired this way has no `error` of its own — the step never got to
+  // write one — so a console showing it should fall back to the run's `error`.
+  if (run.isFailed) {
+    const stopped = steps.findIndex(
+      (step) => step.status !== "done" && step.status !== "skipped"
+    )
+
+    if (stopped !== -1 && steps[stopped].status !== "failed") {
+      const repaired = [...steps]
+      repaired[stopped] = { ...steps[stopped], status: "failed" }
+
+      return { ...run, steps: repaired, isLive }
+    }
+  }
+
+  return { ...run, steps, isLive }
+}
+
+// Every run of this workflow, newest first, each with its steps resolved — what
+// a run console lists and drills into.
+export function useRunHistory(): {
+  runs: WorkflowRun[]
+  error: WorkflowRunsValue["error"]
+} {
+  const { runs, error } = useWorkflowRuns()
+
+  return useMemo(
+    () => ({
+      // Sorted here rather than trusted from the subscription: the console reads
+      // position as recency, and the first entry is also what the canvas paints
+      // as the current run.
+      runs: [...runs]
+        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+        .map(toWorkflowRun),
+      error,
+    }),
+    [runs, error]
+  )
+}
+
 // The steps of the workflow's most recent run, and whether that run is still
 // going — what the canvas needs to paint per-node progress.
 export function useLatestRunSteps(): { steps: RunStep[]; isLive: boolean } {
-  const { runs } = useWorkflowRuns()
+  const { runs } = useRunHistory()
 
   return useMemo(() => {
-    const latest = runs.reduce<(typeof runs)[number] | undefined>(
-      (newest, run) =>
-        !newest || run.createdAt > newest.createdAt ? run : newest,
-      undefined
-    )
+    const latest = runs[0]
 
     if (!latest) return { steps: [], isLive: false }
 
-    // The run carries its own booleans, derived from the same status mapping the
-    // SDK uses, so the canvas never has to keep its own list of status strings in
-    // sync with the ones Trigger.dev happens to send.
-    const isLive =
-      latest.isQueued || latest.isExecuting || latest.isWaiting
-
-    // The task returns its final steps on success, which is the authoritative
-    // finished state; metadata is the live view while the run is still going (and
-    // the only place a failed run's steps ever land, since it returns no output).
-    const steps =
-      latest.output?.steps ??
-      (latest.metadata?.steps as RunStep[] | undefined) ??
-      []
-
-    // A failed run's own "failed" step write is the last thing it does before
-    // throwing, and it can be lost — a dropped flush, a killed worker, a timeout.
-    // The run status is what always arrives, and steps run strictly in order, so
-    // the first step that never reached "done" is where the run stopped. Marking
-    // it is what puts the red border on the node that actually broke.
-    if (latest.isFailed) {
-      const stopped = steps.findIndex((step) => step.status !== "done")
-
-      if (stopped !== -1 && steps[stopped].status !== "failed") {
-        const repaired = [...steps]
-        repaired[stopped] = { ...steps[stopped], status: "failed" }
-        return { steps: repaired, isLive }
-      }
-    }
-
-    return { steps, isLive }
+    return { steps: latest.steps, isLive: latest.isLive }
   }, [runs])
 }

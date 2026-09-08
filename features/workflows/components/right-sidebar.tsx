@@ -25,12 +25,12 @@ import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { WorkflowRunStatus } from "@/features/workflows/components/workflow-run-status"
-import { cn } from "@/lib/utils"
 
 import {
   deleteWorkflowAction,
   runWorkflowAction,
 } from "@/features/workflows/actions"
+import { NodeIcon } from "@/features/workflows/components/node-icon"
 import { useUpstreamConnections } from "@/features/workflows/hooks/use-upstream-connections"
 import { validateGraph } from "@/features/workflows/lib/validate-graph"
 import {
@@ -50,31 +50,6 @@ import {
 // ---------------------------------------------------------------------------
 // Shared pieces — used by both the Toolbar and the Editor.
 // ---------------------------------------------------------------------------
-
-// The accent-colored icon chip, mirroring the node on the canvas.
-function NodeIcon({
-  type,
-  className,
-  iconClassName = "size-3.5",
-}: {
-  type: NodeType
-  className?: string
-  iconClassName?: string
-}) {
-  const def = nodeRegistry[type]
-  const Icon = def.icon
-  return (
-    <span
-      className={cn(
-        "flex size-6 shrink-0 items-center justify-center rounded-md",
-        def.accent,
-        className
-      )}
-    >
-      <Icon className={iconClassName} />
-    </span>
-  )
-}
 
 // A titled, scrollable panel. Each tab renders its content inside one.
 function Section({
@@ -457,8 +432,7 @@ export function RightSidebar({ workflowId }: { workflowId: string }) {
 
   // The currently selected node, read from the shared React Flow store.
   const selected = useStore((s) => s.nodes.find((n) => n.selected)) as
-    | StepNodeType
-    | undefined
+    StepNodeType | undefined
 
   // Auto-switch to the Editor tab when the selection changes.
   const [prevSelectedId, setPrevSelectedId] = useState(selected?.id)

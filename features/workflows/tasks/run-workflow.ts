@@ -2,14 +2,53 @@ import toposort from "toposort"
 import { logger, metadata, task } from "@trigger.dev/sdk"
 import { Stagehand } from "@browserbasehq/stagehand"
 import { nodeExecutors } from "@/features/workflows/nodes/node-executors"
+import type { NodeType } from "@/features/workflows/nodes/node-registry"
 import { interpolate } from "@/features/workflows/lib/interpolate"
 import { getWorkflow } from "@/features/workflows/data"
 
-// One node's live progress, published under the run's "steps" metadata so the
-// canvas can follow along while the run is still going.
+// One node's progress and result, published under the run's "steps" metadata so
+// the canvas can follow along while the run is still going and the run console
+// can show what each step did once it is over.
 export type RunStep = {
   nodeId: string
-  status: "pending" | "running" | "done" | "failed"
+  // Denormalized off the graph rather than looked up from it: a run is history,
+  // and the node it ran may since have been retitled, retyped or deleted. This
+  // is what the console renders the step's icon and title from.
+  nodeType: NodeType
+  title: string
+  // The trigger is the one node that never executes. It starts "skipped" and
+  // flips straight to "done" as the walk passes it, so a finished run reads as
+  // completed all the way through — and it is never "pending" in between, which
+  // is what keeps a failed run's repair from painting the entry point red.
+  status: "pending" | "running" | "done" | "failed" | "skipped"
+  // How long the executor took, in milliseconds. Set once the step settles, so
+  // a failed step reports its time too.
+  durationMs?: number
+  // What the executor returned, clamped by clampOutput.
+  output?: unknown
+  // The message of whatever the executor threw, on a failed step only.
+  error?: string
+}
+
+// Steps ride in the run's metadata, which is capped at 256KB for the whole run —
+// and the SDK throws when a write goes over, which would take down the run it is
+// only meant to be reporting on. A single page-text extract can exceed that on
+// its own, so what a step carries is capped here. Nothing is lost: the full
+// value is still in the run's `outputs` and on the trace timeline.
+const OUTPUT_CHAR_CAP = 4_000
+const ERROR_CHAR_CAP = 2_000
+
+const clampOutput = (output: unknown) => {
+  if (output === undefined) return undefined
+
+  const json = JSON.stringify(output)
+  // undefined for a value JSON cannot represent at all — hand back the tag
+  // rather than a step that silently shows nothing.
+  if (json === undefined) return String(output)
+
+  return json.length <= OUTPUT_CHAR_CAP
+    ? output
+    : `${json.slice(0, OUTPUT_CHAR_CAP)}… (truncated)`
 }
 
 // The Trigger.dev task the Run button fires. It loads the saved graph, works out
@@ -44,13 +83,33 @@ export const runWorkflowTask = task({
     logger.log(`Running workflow ${workflow.name}`, { steps: order.length })
 
     // Publish the whole plan up front so the canvas has every step from the
-    // first frame. Only nodes with an executor are listed — the rest never run,
-    // so a step for one would sit at "pending" forever.
-    let steps: RunStep[] = order
-      .filter((id) => nodeExecutors[byId.get(id)!.data.type])
-      .map((nodeId) => ({ nodeId, status: "pending" }))
+    // first frame. Every connected node is listed, including the ones with no
+    // executor — the trigger, which is where the graph starts rather than work
+    // the run does. Those start as "skipped" rather than "pending": the walk
+    // marks them done the moment it reaches them, and until then they must not
+    // be readable as a step that is waiting to run or as one a failed run
+    // stopped on.
+    let steps: RunStep[] = order.map((nodeId) => {
+      const { type, title } = byId.get(nodeId)!.data
 
-    metadata.set("steps", steps)
+      return {
+        nodeId,
+        nodeType: type,
+        title,
+        status: nodeExecutors[type] ? "pending" : "skipped",
+      }
+    })
+
+    // Round-tripped through JSON rather than handed over as-is: metadata only
+    // holds plain JSON, and a step now carries whatever its executor returned —
+    // an SDK's class instance or an undefined field would be rejected by the
+    // store. Serializing here is also what keeps the published copy detached
+    // from the array below.
+    const publishSteps = () => {
+      metadata.set("steps", JSON.parse(JSON.stringify(steps)))
+    }
+
+    publishSteps()
 
     // Rebuilt rather than mutated, and that is load-bearing: metadata.set keeps
     // the array it is handed, then drops the next set as a no-op if the new value
@@ -58,11 +117,11 @@ export const runWorkflowTask = task({
     // store holds too, so both sides always match and every update after the
     // first is silently discarded. A fresh array each time is what makes the
     // change visible to the diff, and so to the canvas.
-    const setStatus = (nodeId: string, status: RunStep["status"]) => {
+    const updateStep = (nodeId: string, patch: Partial<RunStep>) => {
       steps = steps.map((step) =>
-        step.nodeId === nodeId ? { ...step, status } : step
+        step.nodeId === nodeId ? { ...step, ...patch } : step
       )
-      metadata.set("steps", steps)
+      publishSteps()
     }
 
     // metadata.flush() returns without doing anything if a flush is already in
@@ -94,7 +153,8 @@ export const runWorkflowTask = task({
       // Overridable so a model can be swapped without a code change — model
       // availability moves fast, and a retired or overloaded one is a config
       // problem, not a code one.
-      const modelName = process.env.STAGEHAND_MODEL ?? "anthropic/claude-opus-4-8"
+      const modelName =
+        process.env.STAGEHAND_MODEL ?? "anthropic/claude-opus-4-8"
       // Sending a key of your own is what keeps inference off the shared free-tier
       // path, which is where "quota exceeded" (limit 20) and "this model is
       // experiencing high demand" come from. A plain string means "no key", so
@@ -135,9 +195,17 @@ export const runWorkflowTask = task({
         const node = byId.get(id)!
         logger.log(`Running step: ${node.data.title}`)
         const executor = nodeExecutors[node.data.type]
-        if (!executor) continue
+        // The trigger, and anything else with no executor: no work to do and
+        // nothing to return, so the walk marks it done as it goes past instead
+        // of leaving it behind. Published right away, so the console shows the
+        // run starting at the trigger and moving on rather than a first step
+        // that reads as never run.
+        if (!executor) {
+          updateStep(id, { status: "done" })
+          continue
+        }
 
-        setStatus(id, "running")
+        updateStep(id, { status: "running" })
         // Metadata is flushed on a background timer, so without forcing it here
         // "running" would be overwritten by "done" in memory before it was ever
         // pushed and the canvas would never show the step in flight.
@@ -149,6 +217,11 @@ export const runWorkflowTask = task({
             interpolate(value, outputs),
           ])
         )
+
+        // Timed around the executor alone, so a step's duration is the work it
+        // did and not the interpolation or bookkeeping around it. Read on both
+        // paths below, which is why it sits outside the try.
+        const startedAt = Date.now()
 
         try {
           outputs[id] = await executor({ values, getStagehand })
@@ -163,14 +236,28 @@ export const runWorkflowTask = task({
             output: outputs[id],
           })
         } catch (error) {
-          setStatus(id, "failed")
+          updateStep(id, {
+            status: "failed",
+            durationMs: Date.now() - startedAt,
+            // A non-Error throw is rare but real (a rejected string, an object
+            // from a native binding), and it is exactly the case where losing
+            // the message leaves the console with nothing to show.
+            error: (error instanceof Error
+              ? error.message
+              : String(error)
+            ).slice(0, ERROR_CHAR_CAP),
+          })
           // A thrown run returns no output, so this flush is the only way the
           // failed state ever reaches the canvas.
           await flushSteps()
           throw error
         }
 
-        setStatus(id, "done")
+        updateStep(id, {
+          status: "done",
+          durationMs: Date.now() - startedAt,
+          output: clampOutput(outputs[id]),
+        })
       }
     } finally {
       // Closing releases the Browserbase session; there is no separate browser
