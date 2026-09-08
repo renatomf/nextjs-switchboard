@@ -87,7 +87,12 @@ export function SessionReplay({ sessionId, className }: SessionReplayProps) {
             message:
               response.status === 429
                 ? "Too many replay requests right now. Try again in a minute."
-                : `Couldn't load the replay (${response.status}).`,
+                : // The console locks the Replay row for a non-pro org, so this
+                  // is the plan lapsing while a player is already open rather
+                  // than a route anyone clicked their way to.
+                  response.status === 403
+                  ? "Session replay is part of the Pro plan."
+                  : `Couldn't load the replay (${response.status}).`,
           })
           return false
         }

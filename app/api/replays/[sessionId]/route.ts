@@ -2,6 +2,7 @@ import { APIError } from "@browserbasehq/sdk"
 import { auth } from "@clerk/nextjs/server"
 import type { NextRequest } from "next/server"
 
+import { PRO_PLAN } from "@/lib/billing"
 import { getBrowserbase } from "@/lib/browserbase"
 
 // What Browserbase serves an HLS media playlist as, and what the SDK asks for.
@@ -25,10 +26,25 @@ export async function GET(
   // authenticates the caller without tying the session to them: any signed-in
   // org can replay any session id it knows. See the note in the panel that
   // eventually calls this.
-  const { userId, orgId } = await auth()
+  const { userId, orgId, has } = await auth()
 
   if (!userId || !orgId) {
     return new Response("Unauthorized", { status: 401 })
+  }
+
+  // Replay is a paid feature, and this route is the only way to reach a
+  // recording — the playlist needs the secret key, so nothing downstream can
+  // mint one without coming through here. The console locks the Replay row for
+  // a non-pro org, but that is presentation; this is the enforcement.
+  //
+  // 403 rather than the 202 this route uses for "not ready": the recording is
+  // fine and the caller simply isn't entitled to it, so a poller should give up
+  // rather than wait for something that will never change on its own.
+  if (!has({ plan: PRO_PLAN })) {
+    return Response.json(
+      { error: "Session replay requires the Pro plan" },
+      { status: 403 }
+    )
   }
 
   const { sessionId } = await params

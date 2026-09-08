@@ -36,6 +36,10 @@ export type NodeDefinition = {
   accent: string // Tailwind classes for the icon chip color
   fields: NodeField[]
   outputs: NodeOutput[]
+  // Only orgs on the pro plan can add this node. The toolbar reads the flag
+  // rather than naming node types, so making another node premium is this one
+  // line. Nodes without it are free — the default stays open.
+  premium?: boolean
 }
 
 export const nodeRegistry = {
@@ -124,6 +128,8 @@ export const nodeRegistry = {
     label: "Agent",
     icon: Bot,
     accent: "bg-rose-500 text-white",
+    // Runs a full CUA loop — many model calls per step, our costliest node.
+    premium: true,
     fields: [
       {
         key: "instruction",
@@ -171,6 +177,15 @@ export const nodeRegistry = {
 } satisfies Record<string, NodeDefinition>
 
 export type NodeType = keyof typeof nodeRegistry
+
+// Whether a node type is gated behind the pro plan. A function rather than a
+// bare `nodeRegistry[type].premium` read at each call site: `satisfies` keeps
+// every entry's literal type, so the entries that don't set the flag genuinely
+// have no such key and the union can't be read through.
+export function isPremiumNode(type: NodeType): boolean {
+  const def: NodeDefinition = nodeRegistry[type]
+  return def.premium === true
+}
 
 // Plain JSON only (synced through Liveblocks later). type keys into the registry;
 // kind and title are denormalized so the server can read them without the registry.

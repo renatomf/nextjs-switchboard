@@ -2,12 +2,13 @@
 
 import { useMemo } from "react"
 import { useStore } from "@xyflow/react"
-import { CircleDashed, MonitorPlay } from "lucide-react"
+import { CircleDashed, Lock, MonitorPlay } from "lucide-react"
 import prettyMs from "pretty-ms"
 
 import { Badge } from "@/components/ui/badge"
 import { Spinner } from "@/components/ui/spinner"
 import { NodeIcon } from "@/features/workflows/components/node-icon"
+import { useProPlan } from "@/features/workflows/hooks/use-pro-plan"
 import {
   nodeRegistry,
   type NodeDefinition,
@@ -157,20 +158,42 @@ function ReplayRow({
   isSelected: boolean
   onSelect: () => void
 }) {
+  // Watching a recording is a paid feature. The row stays visible for a non-pro
+  // org — it is what tells them the recording is there at all — but it points at
+  // the billing page instead of opening the player. As in the toolbar, the lock
+  // waits for `isLoaded` so a pro org doesn't see its own replays flash locked.
+  const { isLoaded, isPro, goToBilling } = useProPlan()
+  const locked = isLoaded && !isPro
+
   return (
     <button
       type="button"
-      onClick={onSelect}
-      aria-pressed={isSelected}
+      disabled={!isLoaded}
+      onClick={locked ? goToBilling : onSelect}
+      // A locked row navigates rather than toggling a pane, so it isn't a
+      // pressed-state control while it is in that mode.
+      aria-pressed={locked ? undefined : isSelected}
+      title={
+        locked
+          ? "Session replay is part of the Pro plan — upgrade to watch it"
+          : undefined
+      }
       className={cn(
         "flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-accent hover:text-accent-foreground",
-        isSelected && "bg-accent text-accent-foreground"
+        isSelected && "bg-accent text-accent-foreground",
+        locked && "text-muted-foreground"
       )}
     >
-      <span className="flex size-5 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+      <span
+        className={cn(
+          "flex size-5 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground",
+          locked && "opacity-50"
+        )}
+      >
         <MonitorPlay className="size-3" />
       </span>
       <span className="truncate text-xs font-medium">Replay</span>
+      {locked && <Lock className="ml-auto size-3 shrink-0" />}
     </button>
   )
 }

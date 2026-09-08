@@ -15,6 +15,11 @@ import {
   getWorkflow,
   saveWorkflowGraph
 } from "@/features/workflows/data"
+import {
+  isPremiumNode,
+  nodeRegistry,
+} from "@/features/workflows/nodes/node-registry"
+import { PRO_PLAN } from "@/lib/billing"
 import { getLiveblocks } from "@/lib/liveblocks"
 import { WorkflowGraph } from "@/lib/db/schema"
 
@@ -77,10 +82,36 @@ export async function runWorkflowAction({
   id: string
   graph: WorkflowGraph
 }) {
-  const { orgId } = await auth()
+  const { orgId, has } = await auth()
 
   if (!orgId) {
     throw new Error("No active organization")
+  }
+
+  // Premium nodes are gated at run time, not just in the toolbar. A graph can
+  // hold one without anyone having clicked a locked button: the org may have
+  // downgraded since, or a pro member on the same Liveblocks canvas may have
+  // added it. This is the last point that can stop it — the Trigger.dev task
+  // runs without a Clerk session, so it has no has() to ask.
+  //
+  // Checked before the save so a rejected run doesn't persist the graph that
+  // caused it.
+  if (!has({ plan: PRO_PLAN })) {
+    // Deduped: a workflow can hold several Agent nodes, and naming the node
+    // once is what the message needs.
+    const premium = [
+      ...new Set(
+        graph.nodes
+          .filter((node) => isPremiumNode(node.data.type))
+          .map((node) => nodeRegistry[node.data.type].label)
+      ),
+    ]
+
+    if (premium.length > 0) {
+      throw new Error(
+        `${premium.join(", ")} requires the Pro plan. Upgrade to run this workflow.`
+      )
+    }
   }
 
   await saveWorkflowGraph({ orgId, id, graph })

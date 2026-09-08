@@ -2,7 +2,7 @@
 
 import { useRef, useState, useTransition, type FocusEvent } from "react"
 import { useRouter } from "next/navigation"
-import { MoreHorizontal, Play, Trash2 } from "lucide-react"
+import { Lock, MoreHorizontal, Play, Trash2 } from "lucide-react"
 import { useReactFlow, useStore } from "@xyflow/react"
 import { toast } from "sonner"
 
@@ -31,8 +31,10 @@ import {
   runWorkflowAction,
 } from "@/features/workflows/actions"
 import { NodeIcon } from "@/features/workflows/components/node-icon"
+import { useProPlan } from "@/features/workflows/hooks/use-pro-plan"
 import { useUpstreamConnections } from "@/features/workflows/hooks/use-upstream-connections"
 import { validateGraph } from "@/features/workflows/lib/validate-graph"
+import { cn } from "@/lib/utils"
 import {
   nodeRegistry,
   type NodeDefinition,
@@ -234,8 +236,10 @@ const sections: { kind: StepNodeKind; label: string }[] = [
   { kind: "action", label: "Actions" },
 ]
 
-// Every node type from the registry, filtered into the groups below.
-const definitions = Object.values(nodeRegistry)
+// Every node type from the registry, filtered into the groups below. Widened to
+// NodeDefinition so optional manifest flags (premium) are readable — `satisfies`
+// keeps each entry's literal type, which omits the keys it didn't set.
+const definitions: NodeDefinition[] = Object.values(nodeRegistry)
 
 // The Toolbar tab: a button per node type that adds it to the canvas.
 function Palette() {
@@ -245,10 +249,21 @@ function Palette() {
   // The pane's measured size, used to find the center of the current view.
   const width = useStore((s) => s.width)
   const height = useStore((s) => s.height)
+  // Gates the premium nodes. `isLoaded` is held separately so the lock only
+  // appears once we actually know the org's plan — otherwise a pro org sees its
+  // Agent node flash as locked on every mount and after every org switch.
+  const { isLoaded, isPro, goToBilling } = useProPlan()
 
   const add = (type: NodeType) => {
-    const def = nodeRegistry[type]
+    const def: NodeDefinition = nodeRegistry[type]
     const nodes = getNodes()
+
+    // Premium nodes are the plan's whole point, so re-check here rather than
+    // trusting the button to have been rendered locked.
+    if (def.premium && !isPro) {
+      goToBilling()
+      return
+    }
 
     // Only one trigger is allowed — a workflow has a single entry point.
     if (
@@ -300,17 +315,36 @@ function Palette() {
             <AccordionContent className="flex flex-col gap-0.5">
               {definitions
                 .filter((def) => def.kind === section.kind)
-                .map((def) => (
-                  <Button
-                    key={def.type}
-                    variant="ghost"
-                    onClick={() => add(def.type as NodeType)}
-                    className="justify-start gap-2.5 px-1.5 text-xs"
-                  >
-                    <NodeIcon type={def.type as NodeType} />
-                    {def.label}
-                  </Button>
-                ))}
+                .map((def) => {
+                  // Locked reads as "we know they can't have it", which is only
+                  // true once the plan has resolved. Until then the node is
+                  // simply not clickable yet — no lock, no upgrade prompt.
+                  const locked = def.premium && isLoaded && !isPro
+                  return (
+                    <Button
+                      key={def.type}
+                      variant="ghost"
+                      disabled={def.premium && !isLoaded}
+                      onClick={() => add(def.type as NodeType)}
+                      title={
+                        locked
+                          ? `${def.label} is part of the Pro plan — upgrade to add it`
+                          : undefined
+                      }
+                      className={cn(
+                        "justify-start gap-2.5 px-1.5 text-xs",
+                        locked && "text-muted-foreground"
+                      )}
+                    >
+                      <NodeIcon
+                        type={def.type as NodeType}
+                        className={locked ? "opacity-50 grayscale" : undefined}
+                      />
+                      {def.label}
+                      {locked && <Lock className="ml-auto size-3" />}
+                    </Button>
+                  )
+                })}
             </AccordionContent>
           </AccordionItem>
         ))}
