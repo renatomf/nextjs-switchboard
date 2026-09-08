@@ -150,20 +150,15 @@ export const runWorkflowTask = task({
       const apiKey = process.env.BROWSERBASE_API_KEY
       if (!apiKey) throw new Error("BROWSERBASE_API_KEY is not set")
 
-      // Overridable so a model can be swapped without a code change — model
-      // availability moves fast, and a retired or overloaded one is a config
-      // problem, not a code one.
-      const modelName =
-        process.env.STAGEHAND_MODEL ?? "anthropic/claude-opus-4-8"
-      // Sending a key of your own is what keeps inference off the shared free-tier
-      // path, which is where "quota exceeded" (limit 20) and "this model is
-      // experiencing high demand" come from. A plain string means "no key", so
-      // only widen the config to an object when there is one to pass.
+      // Hardcoded, and passed as a bare string rather than a { modelName, apiKey }
+      // object: no key means inference goes down the shared free-tier path, which
+      // is the point of running this model.
       //
-      // The key has to match the provider in modelName — it is handed straight to
-      // whoever serves the model — so an override through STAGEHAND_MODEL only
-      // works while it stays on anthropic/.
-      const modelApiKey = process.env.CLAUDE_API_KEY
+      // That path is metered, so expect "quota exceeded" (limit 20) and "this
+      // model is experiencing high demand" under any real load — those are the
+      // free tier talking, not a broken run. Passing a key of your own is what
+      // buys past them; it has to match the provider in the model name.
+      const modelName = "google/gemini-3.5-flash"
 
       stagehand = new Stagehand({
         // Runs the session on Browserbase rather than a local Chrome, and routes
@@ -171,7 +166,7 @@ export const runWorkflowTask = task({
         // run show up under the session's Stagehand tab in the dashboard.
         env: "BROWSERBASE",
         apiKey,
-        model: modelApiKey ? { modelName, apiKey: modelApiKey } : modelName,
+        model: modelName,
         // Pino's logging backend spawns a thread-stream worker (lib/worker.js)
         // that can't be resolved inside trigger.dev's bundled output. Disable it —
         // the option exists for exactly these minimal/bundled environments.
