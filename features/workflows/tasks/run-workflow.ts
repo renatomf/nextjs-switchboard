@@ -271,6 +271,12 @@ export const runWorkflowTask = task({
     // outputs rides along so what each node actually produced — the page title, an
     // extraction — is readable after the run instead of only being interpolation
     // fuel that dies with the worker.
-    return { steps, outputs }
+    //
+    // browserbaseSessionId goes out here rather than in metadata on purpose: the
+    // recording is only fetchable once the session has closed, which happens in
+    // the finally above — so the earliest point it is any use to a replay panel is
+    // the run's final output. undefined for a run whose graph never opened a
+    // browser at all.
+    return { steps, outputs, browserbaseSessionId }
   },
 })

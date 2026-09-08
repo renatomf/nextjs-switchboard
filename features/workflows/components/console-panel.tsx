@@ -10,22 +10,26 @@ import {
 import { InspectorPanel } from "@/features/workflows/components/inspector-panel"
 import {
   LogsPanel,
-  type SelectedStep,
+  selectionKey,
+  type ConsoleSelection,
 } from "@/features/workflows/components/logs-panel"
 
-// The console below the canvas. It owns which step is selected — the list only
-// reports clicks — so that the detail view of a step's output has one place to
-// read the selection from.
+// The console below the canvas. It owns what is selected — the list only reports
+// clicks — so that the output pane has one place to read the selection from.
 export function ConsolePanel() {
-  const [selected, setSelected] = useState<SelectedStep | null>(null)
+  // One slot for both kinds of row, which is what makes "only one open at a
+  // time" a property of the state rather than something the handlers have to
+  // maintain: selecting a replay overwrites the step it replaces, and vice
+  // versa, because there is nowhere else for either to live.
+  const [selected, setSelected] = useState<ConsoleSelection | null>(null)
 
-  // Clicking the selected step again clears it, so a row is its own toggle and
+  // Clicking whatever is already open clears it, so a row is its own toggle and
   // there is no separate way to close what you opened.
-  const selectStep = (step: SelectedStep) => {
+  const select = (selection: ConsoleSelection) => {
     setSelected((current) =>
-      current?.runId === step.runId && current.nodeId === step.nodeId
+      current && selectionKey(current) === selectionKey(selection)
         ? null
-        : step
+        : selection
     )
   }
 
@@ -36,7 +40,7 @@ export function ConsolePanel() {
       className="size-full bg-background"
     >
       <ResizablePanel id="logs" minSize="16rem">
-        <LogsPanel selected={selected} onSelectStep={selectStep} />
+        <LogsPanel selected={selected} onSelect={select} />
       </ResizablePanel>
       {/* Handle and inspector both come and go with the selection, so the runs
           list has the whole panel — which is short — the rest of the time. The

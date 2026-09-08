@@ -69,6 +69,9 @@ function useWorkflowRuns() {
 export type WorkflowRun = WorkflowRuns["runs"][number] & {
   steps: RunStep[]
   isLive: boolean
+  // The Browserbase session the run drove, for a panel to fetch the replay from.
+  // undefined until the run finishes, and for any run that never opened a browser.
+  browserbaseSessionId?: string
 }
 
 function toWorkflowRun(run: WorkflowRuns["runs"][number]): WorkflowRun {
@@ -82,6 +85,13 @@ function toWorkflowRun(run: WorkflowRuns["runs"][number]): WorkflowRun {
   // the only place a failed run's steps ever land, since it returns no output).
   const steps =
     run.output?.steps ?? (run.metadata?.steps as RunStep[] | undefined) ?? []
+
+  // Output only — deliberately not read from live metadata. The session's
+  // recording is not retrievable until the session closes, which the task does on
+  // its way out, so an id surfaced mid-run would point at a replay that is not
+  // there yet. Absent here means "no replay to offer", which is exactly what a
+  // still-running run should read as.
+  const browserbaseSessionId = run.output?.browserbaseSessionId
 
   // A failed run's own "failed" step write is the last thing it does before
   // throwing, and it can be lost — a dropped flush, a killed worker, a timeout.
@@ -103,11 +113,11 @@ function toWorkflowRun(run: WorkflowRuns["runs"][number]): WorkflowRun {
       const repaired = [...steps]
       repaired[stopped] = { ...steps[stopped], status: "failed" }
 
-      return { ...run, steps: repaired, isLive }
+      return { ...run, steps: repaired, isLive, browserbaseSessionId }
     }
   }
 
-  return { ...run, steps, isLive }
+  return { ...run, steps, isLive, browserbaseSessionId }
 }
 
 // Every run of this workflow, newest first, each with its steps resolved — what
