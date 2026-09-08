@@ -1,3 +1,4 @@
+import * as Sentry from "@sentry/nextjs"
 import { auth, clerkClient } from "@clerk/nextjs/server"
 
 // `Liveblocks` is a global interface declared in liveblocks.config.ts.
@@ -10,11 +11,21 @@ export async function POST(request: Request) {
     return new Response("Unauthorized", { status: 401 })
   }
 
+  Sentry.getIsolationScope().setAttributes({
+    route: "POST /api/liveblocks/users",
+    userId,
+    orgId,
+  })
 
   let userIds: unknown
   try {
     ;({ userIds } = await request.json())
   } catch {
+    // A 400 is the right answer and not an exception, but the only client of
+    // this route is our own canvas — so a malformed body means we sent one.
+    Sentry.logger.warn("Liveblocks user resolution — invalid JSON body", {
+      orgId,
+    })
     return new Response("Invalid JSON body", { status: 400 })
   }
 
@@ -22,6 +33,9 @@ export async function POST(request: Request) {
     !Array.isArray(userIds) ||
     userIds.some((id) => typeof id !== "string")
   ) {
+    Sentry.logger.warn("Liveblocks user resolution — malformed userIds", {
+      orgId,
+    })
     return new Response("Expected { userIds: string[] }", { status: 400 })
   }
 
@@ -58,6 +72,15 @@ export async function POST(request: Request) {
         "Anonymous",
       avatar: user.imageUrl,
     }
+  })
+
+  // requested vs resolved is the useful pair: a gap means ids were asked for
+  // that the caller's org doesn't contain, which is what a stale cursor looks
+  // like from here.
+  Sentry.logger.info("Liveblocks users resolved", {
+    orgId,
+    requested: ids.length,
+    resolved: resolved.filter(Boolean).length,
   })
 
   return Response.json(resolved)

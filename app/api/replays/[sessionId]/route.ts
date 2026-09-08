@@ -1,4 +1,5 @@
 import { APIError } from "@browserbasehq/sdk"
+import * as Sentry from "@sentry/nextjs"
 import { auth } from "@clerk/nextjs/server"
 import type { NextRequest } from "next/server"
 
@@ -32,6 +33,12 @@ export async function GET(
     return new Response("Unauthorized", { status: 401 })
   }
 
+  Sentry.getIsolationScope().setAttributes({
+    route: "GET /api/replays/[sessionId]",
+    userId,
+    orgId,
+  })
+
   // Replay is a paid feature, and this route is the only way to reach a
   // recording — the playlist needs the secret key, so nothing downstream can
   // mint one without coming through here. The console locks the Replay row for
@@ -41,6 +48,11 @@ export async function GET(
   // fine and the caller simply isn't entitled to it, so a poller should give up
   // rather than wait for something that will never change on its own.
   if (!has({ plan: PRO_PLAN })) {
+    Sentry.logger.warn("Replay blocked by plan", {
+      orgId,
+      requiredPlan: PRO_PLAN,
+    })
+
     return Response.json(
       { error: "Session replay requires the Pro plan" },
       { status: 403 }
@@ -82,6 +94,12 @@ export async function GET(
       page.pageId
     )
 
+    Sentry.logger.info("Session replay served", {
+      orgId,
+      sessionId,
+      pageCount: replay.pages.length,
+    })
+
     return new Response(await playlist.text(), {
       headers: {
         "content-type": PLAYLIST_CONTENT_TYPE,
@@ -104,6 +122,10 @@ export async function GET(
       // requests a minute across everyone, and a caller that sees this should
       // slow down instead of treating it as a failed replay.
       if (error.status === 429) {
+        // The project-wide replay quota, not this caller's problem to fix —
+        // which is exactly why it should be visible when it starts happening.
+        Sentry.logger.warn("Replay quota exhausted", { orgId, sessionId })
+
         return Response.json({ status: "rate-limited" }, { status: 429 })
       }
     }

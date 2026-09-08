@@ -1,6 +1,7 @@
 "use client"
 
-import { createContext, useContext, useMemo, type ReactNode } from "react"
+import { createContext, useContext, useEffect, useMemo, type ReactNode } from "react"
+import * as Sentry from "@sentry/nextjs"
 import { useRealtimeRunsWithTag } from "@trigger.dev/react-hooks"
 
 import type {
@@ -42,6 +43,23 @@ export function WorkflowRunsProvider({
       skipColumns: ["payload"],
     }
   )
+
+  // The panels render this error as "Lost connection to the runs", which tells
+  // the user but nobody else. A dropped subscription means the canvas stops
+  // showing live progress, so it is worth seeing — an expired public token or a
+  // socket that will not reconnect both land here.
+  useEffect(() => {
+    if (!error) return
+
+    Sentry.logger.error("Realtime run subscription dropped", {
+      workflowId,
+      reason: error.message,
+    })
+    Sentry.captureException(error, {
+      tags: { area: "trigger-realtime" },
+      extra: { workflowId },
+    })
+  }, [error, workflowId])
 
   const value = useMemo(() => ({ runs, error }), [runs, error])
 

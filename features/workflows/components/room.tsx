@@ -1,6 +1,7 @@
 "use client"
 
 import { ReactNode } from "react"
+import * as Sentry from "@sentry/nextjs"
 import {
   LiveblocksProvider,
   RoomProvider,
@@ -28,11 +29,22 @@ export function Room({
           })
 
           if (!response.ok) {
+            Sentry.captureException(
+              new Error(`Resolving Liveblocks users failed (${response.status})`),
+              { tags: { area: "liveblocks" }, extra: { userIds } }
+            )
             return undefined
           }
 
           return await response.json()
-        } catch {
+        } catch (error) {
+          // Returning undefined only costs the cursors their names, so this
+          // stays non-fatal for the canvas — but silently is how it stayed
+          // broken. Reported, then degraded.
+          Sentry.captureException(error, {
+            tags: { area: "liveblocks" },
+            extra: { userIds },
+          })
           return undefined
         }
       }}

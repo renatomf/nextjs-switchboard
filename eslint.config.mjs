@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Trigger.dev's bundled task output, written by `trigger.dev dev` and
+    // `deploy`. It only exists after a worker has run, which is why linting
+    // passed without it — and why it fails as soon as anyone starts the worker.
+    ".trigger/**",
   ]),
 ]);
 

@@ -1,5 +1,6 @@
 "use client"
 
+import * as Sentry from "@sentry/nextjs"
 import { useEffect, useRef, useState } from "react"
 import { LoaderCircle, TriangleAlert } from "lucide-react"
 
@@ -67,11 +68,17 @@ export function SessionReplay({ sessionId, className }: SessionReplayProps) {
 
         try {
           response = await fetch(src, { signal: controller.signal })
-        } catch {
+        } catch (error) {
           // An aborted fetch throws too, and that is an unmount rather than a
-          // failure — there is no one left to show an error to.
+          // failure — there is no one left to show an error to, and nothing to
+          // report either.
           if (cancelled) return false
 
+          Sentry.logger.error("Replay service unreachable", { sessionId })
+          Sentry.captureException(error, {
+            tags: { area: "session-replay" },
+            extra: { sessionId },
+          })
           setState({
             status: "error",
             message: "Couldn't reach the replay service.",
@@ -82,6 +89,20 @@ export function SessionReplay({ sessionId, className }: SessionReplayProps) {
         if (response.ok) return true
 
         if (response.status !== 202) {
+          // 429 and 403 are the service and the plan answering as designed, so
+          // they are shown and not filed. Anything else is the route breaking.
+          Sentry.logger.warn("Replay unavailable", {
+            sessionId,
+            status: response.status,
+          })
+
+          if (response.status !== 429 && response.status !== 403) {
+            Sentry.captureException(
+              new Error(`Replay request failed (${response.status})`),
+              { tags: { area: "session-replay" }, extra: { sessionId } }
+            )
+          }
+
           setState({
             status: "error",
             message:

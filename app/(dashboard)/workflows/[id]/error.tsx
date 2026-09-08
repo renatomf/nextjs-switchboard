@@ -1,6 +1,7 @@
 "use client" // Error boundaries must be Client Components
 
 import { useEffect } from "react"
+import * as Sentry from "@sentry/nextjs"
 import { RotateCw, TriangleAlert } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -21,7 +22,15 @@ export default function Error({
   unstable_retry: () => void
 }) {
   useEffect(() => {
-    console.error(error)
+    // Anything that reaches this boundary is unhandled by definition, so it
+    // goes to Sentry. A server error arrives here already digested — the
+    // matching server-side event is what carries its stack, and the digest is
+    // the string that ties the two together, which is why it is logged.
+    Sentry.logger.error("Workflow route hit its error boundary", {
+      message: error.message,
+      digest: error.digest ?? "none",
+    })
+    Sentry.captureException(error)
   }, [error])
 
   return (

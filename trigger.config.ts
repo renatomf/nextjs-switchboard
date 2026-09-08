@@ -1,3 +1,5 @@
+import { sentryEsbuildPlugin } from "@sentry/esbuild-plugin"
+import { esbuildPlugin } from "@trigger.dev/build/extensions"
 import { defineConfig } from "@trigger.dev/sdk"
 
 export default defineConfig({
@@ -20,6 +22,22 @@ export default defineConfig({
   },
   dirs: ["features"],
   build: {
+    extensions: [
+      // Uploads the deployed bundle's source maps to Sentry, so a stack trace
+      // from a failed run points at the TypeScript that was written instead of
+      // the bundled output. Deploy-only and placed last: there is nothing to
+      // upload from a dev run, and the plugin has to see the final bundle.
+      esbuildPlugin(
+        sentryEsbuildPlugin({
+          org: "ammodev",
+          project: "browserbase",
+          // Set SENTRY_AUTH_TOKEN in the Trigger.dev environment for deploys;
+          // locally it comes from the gitignored .env.sentry-build-plugin.
+          authToken: process.env.SENTRY_AUTH_TOKEN,
+        }),
+        { placement: "last", target: "deploy" }
+      ),
+    ],
     // Stagehand ships a Chrome extension zip that it uploads to Browserbase on
     // session start, and it finds that zip by walking up from its own file. Once
     // bundled, that walk lands inside .trigger/ instead of node_modules and the

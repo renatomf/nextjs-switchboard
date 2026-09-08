@@ -2,6 +2,7 @@
 
 import { useRef, useState, useTransition, type FocusEvent } from "react"
 import { useRouter } from "next/navigation"
+import * as Sentry from "@sentry/nextjs"
 import { Lock, MoreHorizontal, Play, Trash2 } from "lucide-react"
 import { useReactFlow, useStore } from "@xyflow/react"
 import { toast } from "sonner"
@@ -366,7 +367,16 @@ function ActionsMenu({ workflowId }: { workflowId: string }) {
     startTransition(async () => {
       try {
         await deleteWorkflowAction(workflowId)
-      } catch {
+      } catch (error) {
+        // The toast is what the user gets; the report is how anyone finds out
+        // it happened. A server action's message is replaced by a digest in
+        // production, so the matching server-side event carries the stack and
+        // this one carries the user and the workflow.
+        Sentry.logger.error("Workflow delete failed", { workflowId })
+        Sentry.captureException(error, {
+          tags: { action: "delete-workflow" },
+          extra: { workflowId },
+        })
         toast.error("Failed to delete workflow")
         return
       }
@@ -425,6 +435,15 @@ function RunButton({
     const graph = { nodes: getNodes(), edges: getEdges() }
     const problems = validateGraph(graph)
     if (problems.length > 0) {
+      // A graph the user built that can't run. Not an error — the pre-flight
+      // did its job — but which shapes keep failing it is worth knowing.
+      Sentry.logger.warn("Workflow run rejected by validation", {
+        workflowId,
+        problem: problems[0],
+        problemCount: problems.length,
+        nodeCount: graph.nodes.length,
+        edgeCount: graph.edges.length,
+      })
       toast.error(problems[0])
       return
     }
@@ -432,7 +451,20 @@ function RunButton({
     startTransition(async () => {
       try {
         onStarted(await runWorkflowAction({ id: workflowId, graph }))
-      } catch {
+      } catch (error) {
+        Sentry.logger.error("Workflow run failed to start", {
+          workflowId,
+          nodeCount: graph.nodes.length,
+          edgeCount: graph.edges.length,
+        })
+        Sentry.captureException(error, {
+          tags: { action: "run-workflow" },
+          extra: {
+            workflowId,
+            nodeCount: graph.nodes.length,
+            edgeCount: graph.edges.length,
+          },
+        })
         toast.error("Failed to start workflow run")
       }
     })
