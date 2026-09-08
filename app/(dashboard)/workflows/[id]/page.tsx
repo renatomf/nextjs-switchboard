@@ -22,7 +22,9 @@ export default async function Page({
   params: Promise<{ id: string }>
 }) {
   const { id } = await params
-  const { orgId, has } = await auth()
+  // protect() answers the signed-out case with a redirect to sign-in; the
+  // notFound() below is now only about a signed-in user with no active org.
+  const { orgId, has } = await auth.protect()
   if (!orgId) notFound()
 
   // Isolation scope, not global: it is per-request, so one org's attributes

@@ -15,7 +15,7 @@ export default async function Page() {
   // has nothing to subscribe. The sidebar's OrganizationSwitcher runs with
   // `hidePersonal`, and the instance forces org selection at sign-in, so this
   // is a guard rather than a path users normally hit.
-  const { orgId } = await auth()
+  const { orgId } = await auth.protect()
 
   return (
     <div className="h-full overflow-y-auto">
