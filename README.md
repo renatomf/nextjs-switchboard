@@ -121,10 +121,11 @@ sequenceDiagram
     C->>C: validateGraph — 1 gatilho, tem aresta, sem ciclo
     C->>A: runWorkflowAction com id e grafo
     A->>A: auth — exige orgId e confere o plano
-    A->>PG: UPDATE workflows SET graph
-    A->>T: tasks.trigger run-workflow, tag workflow id
+    A->>PG: INSERT workflow_versions — versão imutável do grafo
+    A->>T: tasks.trigger run-workflow com o versionId, tag workflow id
     A-->>C: devolve o handle da execução
 
+    T->>PG: lê exatamente a versão da run
     T->>T: toposort — ordem de dependência
 
     loop para cada nó conectado
@@ -303,7 +304,7 @@ flowchart TB
 
     Clerk[("🔐 Clerk<br/>login, organizações e planos")]
     Sala[("🟢 Liveblocks<br/>sala = workflowId<br/>cópia viva do fluxo")]
-    Banco[("🐘 Neon Postgres<br/>workflows.graph jsonb<br/>retrato salvo no Run")]
+    Banco[("🐘 Neon Postgres<br/>workflow_versions<br/>uma versão imutável por Run")]
 
     subgraph Worker["🔵 Trigger.dev · task run-workflow"]
         Topo["toposort<br/>ordem de dependência"]
@@ -340,7 +341,7 @@ flowchart TB
     Dados -->|"sempre filtrado por orgId"| Banco
 
     Actions -->|"tasks.trigger com a tag do fluxo"| Topo
-    Banco -->|"o worker lê o retrato"| Topo
+    Banco -->|"o worker lê a versão da run"| Topo
     Topo --> Interp --> Exec
     Exec --> Meta
     Meta -->|"token público preso à tag"| Assina
@@ -364,9 +365,11 @@ flowchart TB
 | Cópia | Onde mora | Quando é escrita | Quem lê |
 | --- | --- | --- | --- |
 | **Viva** | sala do Liveblocks | a cada tecla, por todo mundo junto | o canvas e a trava de plano |
-| **Retrato** | coluna `graph` (jsonb) | no clique em **Run** | o worker do Trigger.dev |
+| **Versão** | tabela `workflow_versions`, uma linha imutável por Run | no clique em **Run** | o worker do Trigger.dev, pelo `versionId` da run |
 
-O worker não tem conexão com a sala — é para isso que o retrato existe. Já a trava de plano lê a
+O worker não tem conexão com a sala — é para isso que a versão existe. E ela é imutável: se alguém
+rodar de novo enquanto uma run ainda está na fila, cada uma executa o grafo com que foi iniciada
+([ADR 0002](docs/adr/0002-versoes-imutaveis-de-workflow.md)). Já a trava de plano lê a
 **sala**, e não o retrato: um fluxo montado no Pro e nunca executado tem o nó Agent na sala e nada
 no Postgres.
 
@@ -380,6 +383,13 @@ workflows
   graph       jsonb                     -- { nodes, edges } no formato do React Flow
   created_at  timestamp   not null
   updated_at  timestamp   not null
+
+workflow_versions                        -- uma por Run, nunca alterada
+  id           uuid       pk, default random
+  workflow_id  uuid       fk → workflows, on delete cascade
+  org_id       text       not null
+  graph        jsonb      not null
+  created_at   timestamp  not null
 ```
 
 O `graph` espelha o formato do React Flow **1:1**, então o executor lê o fluxo sem precisar converter

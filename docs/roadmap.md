@@ -41,8 +41,9 @@ As decisões ficam em [`docs/adr/`](adr/).
 
 ## Fase B — Execution como núcleo
 
-- [ ] **B.1** Versões imutáveis de workflow: rascunho no Liveblocks, versão publicada no Postgres.
+- [x] **B.1** Versões imutáveis de workflow: rascunho no Liveblocks, versão publicada no Postgres.
       Corrige a race condition entre salvar o grafo e a task lê-lo
+      ([ADR 0002](adr/0002-versoes-imutaveis-de-workflow.md))
 - [ ] **B.2** Tabelas `executions` e `execution_steps`, atualizadas pelos hooks do Trigger.dev.
       Corrige o IDOR do replay (hoje não há como ligar um `sessionId` a uma org)
 - [ ] **B.3** Aggregate `Execution` com state machine, em TDD; status `cancelled` no step
