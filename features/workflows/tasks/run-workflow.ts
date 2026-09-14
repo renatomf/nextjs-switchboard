@@ -1,5 +1,5 @@
 import toposort from "toposort"
-import { logger, metadata, task } from "@trigger.dev/sdk"
+import { logger, metadata, task, type TaskRunContext } from "@trigger.dev/sdk"
 import { Stagehand } from "@browserbasehq/stagehand"
 import { nodeExecutors } from "@/features/workflows/nodes/node-executors"
 import type { NodeType } from "@/features/workflows/nodes/node-registry"
@@ -8,6 +8,10 @@ import {
   loadRunGraph,
   type RunWorkflowPayload,
 } from "@/features/workflows/tasks/load-run-graph"
+import {
+  trackBrowserSession,
+  trackExecution,
+} from "@/features/workflows/tasks/execution-tracking"
 
 // One node's progress and result, published under the run's "steps" metadata so
 // the canvas can follow along while the run is still going and the run console
@@ -66,7 +70,25 @@ export const runWorkflowTask = task({
   // actually happen here (a bad instruction, a retired model, an exhausted quota)
   // are not the kind a retry fixes. One attempt, and the run reports what broke.
   retry: { maxAttempts: 1 },
-  run: async (payload: RunWorkflowPayload) => {
+  // Each hook moves the run's row in the executions table, and none of them
+  // throws (see trackExecution). The app covers what they cannot see: it
+  // writes the row when it triggers the run, and records a cancel itself,
+  // since onCancel only fires for a run a worker is executing.
+  onStartAttempt: ({ payload, ctx }) =>
+    trackExecution(ctx.run.id, payload, "started"),
+  onSuccess: ({ payload, ctx }) =>
+    trackExecution(ctx.run.id, payload, "succeeded"),
+  onFailure: ({ payload, ctx, error }) =>
+    trackExecution(ctx.run.id, payload, "failed", error),
+  onCancel: ({ payload, ctx }) =>
+    trackExecution(ctx.run.id, payload, "cancelled"),
+  // Both parameters typed: with the second one left bare, the function turns
+  // context-sensitive, TypeScript stops inferring the payload type from it, and
+  // every hook above sees the payload as void.
+  run: async (
+    payload: RunWorkflowPayload,
+    { ctx }: { ctx: TaskRunContext }
+  ) => {
     // The graph this run was started with, not the workflow as it is now: see
     // loadRunGraph.
     const { nodes, edges } = await loadRunGraph(payload)
@@ -181,6 +203,11 @@ export const runWorkflowTask = task({
       await stagehand.init()
       browserbaseSessionId = stagehand.browserbaseSessionID
       logger.log("Started Browserbase session", { browserbaseSessionId })
+      // On the execution too: it is what lets the replay route tie this
+      // recording to an org.
+      if (browserbaseSessionId) {
+        await trackBrowserSession(ctx.run.id, browserbaseSessionId)
+      }
 
       return stagehand
     }

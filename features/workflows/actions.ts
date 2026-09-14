@@ -10,10 +10,12 @@ import { redirect } from "next/navigation"
 import type { runWorkflowTask } from "@/features/workflows/tasks/run-workflow"
 
 import {
+  advanceExecution,
   createWorkflow,
   deleteWorkflow,
   getWorkflow,
   publishWorkflowVersion,
+  recordExecution,
 } from "@/features/workflows/data"
 import {
   planRequiredMessage,
@@ -192,6 +194,21 @@ export async function runWorkflowAction({
     { tags: [workflowRunTag(id)] }
   )
 
+  // The run's durable record, as queued. Not worth failing the Run button
+  // over: the run is already in Trigger.dev, and the worker writes the row
+  // itself when the run starts. Reported, since the row is then late.
+  await recordExecution({
+    runId: handle.id,
+    orgId,
+    workflowId: id,
+    versionId: version.id,
+  }).catch((error: unknown) => {
+    Sentry.captureException(error, {
+      tags: { area: "executions" },
+      extra: { orgId, workflowId: id, runId: handle.id },
+    })
+  })
+
   // One wide event rather than a start/end pair: everything worth correlating
   // about this run is knowable here, and the run's own progress is already
   // traced in Trigger.dev under this same id.
@@ -245,6 +262,21 @@ export async function cancelWorkflowRunAction({
   }
 
   await runs.cancel(runId)
+
+  // Recorded here as well as by the worker: its onCancel hook only fires for a
+  // run it is executing, so a run stopped in the queue would otherwise stay
+  // "queued" for good. Whichever write lands second changes nothing.
+  await advanceExecution({
+    runId,
+    orgId,
+    workflowId,
+    event: "cancelled",
+  }).catch((error: unknown) => {
+    Sentry.captureException(error, {
+      tags: { area: "executions" },
+      extra: { orgId, workflowId, runId },
+    })
+  })
 
   Sentry.logger.info("Workflow run cancelled", { orgId, workflowId, runId })
 }

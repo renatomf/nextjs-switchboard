@@ -10,6 +10,8 @@ const {
   auth,
   getWorkflow,
   publishWorkflowVersion,
+  recordExecution,
+  advanceExecution,
   retrieveRun,
   cancelRun,
   triggerTask,
@@ -17,6 +19,8 @@ const {
   auth: vi.fn(),
   getWorkflow: vi.fn(),
   publishWorkflowVersion: vi.fn(),
+  recordExecution: vi.fn(),
+  advanceExecution: vi.fn(),
   retrieveRun: vi.fn(),
   cancelRun: vi.fn(),
   triggerTask: vi.fn(),
@@ -30,6 +34,8 @@ vi.mock("@trigger.dev/sdk", () => ({
 vi.mock("@/features/workflows/data", () => ({
   getWorkflow,
   publishWorkflowVersion,
+  recordExecution,
+  advanceExecution,
   createWorkflow: vi.fn(),
   deleteWorkflow: vi.fn(),
 }))
@@ -49,6 +55,7 @@ describe("runWorkflowAction", () => {
   beforeEach(() => {
     auth.mockResolvedValue({ orgId: "org_a", has: () => true })
     triggerTask.mockResolvedValue({ id: "run_1" })
+    recordExecution.mockResolvedValue(undefined)
   })
 
   it("publishes the graph as a version and runs exactly that version", async () => {
@@ -66,6 +73,31 @@ describe("runWorkflowAction", () => {
       { workflowId: "wf_1", orgId: "org_a", versionId: "ver_1" },
       { tags: ["workflow:wf_1"] }
     )
+  })
+
+  it("records the execution under the run it started", async () => {
+    publishWorkflowVersion.mockResolvedValue({ id: "ver_1" })
+
+    await runWorkflowAction({ id: "wf_1", graph })
+
+    expect(recordExecution).toHaveBeenCalledWith({
+      runId: "run_1",
+      orgId: "org_a",
+      workflowId: "wf_1",
+      versionId: "ver_1",
+    })
+  })
+
+  // The run is already in Trigger.dev by then, and the worker writes the row
+  // itself when it starts. Failing the Run button here would only hide a run
+  // that is going ahead anyway.
+  it("still returns the run when recording its execution fails", async () => {
+    publishWorkflowVersion.mockResolvedValue({ id: "ver_1" })
+    recordExecution.mockRejectedValue(new Error("connection reset"))
+
+    await expect(runWorkflowAction({ id: "wf_1", graph })).resolves.toEqual({
+      id: "run_1",
+    })
   })
 
   // The race this closes: a run used to read the workflow's latest graph when
@@ -92,6 +124,7 @@ describe("runWorkflowAction", () => {
       "Workflow not found"
     )
     expect(triggerTask).not.toHaveBeenCalled()
+    expect(recordExecution).not.toHaveBeenCalled()
   })
 })
 
@@ -105,12 +138,37 @@ describe("cancelWorkflowRunAction", () => {
       tags: ["workflow:wf_1"],
     })
     cancelRun.mockResolvedValue({ id: "run_1" })
+    advanceExecution.mockResolvedValue(undefined)
   })
 
   it("cancels a run of the caller's own workflow", async () => {
     await cancelWorkflowRunAction({ workflowId: "wf_1", runId: "run_1" })
 
     expect(getWorkflow).toHaveBeenCalledWith("org_a", "wf_1")
+    expect(cancelRun).toHaveBeenCalledWith("run_1")
+  })
+
+  // The worker's onCancel hook only fires for a run it is executing. A run
+  // stopped while still queued would stay "queued" forever without this.
+  it("records the cancellation on the execution", async () => {
+    await cancelWorkflowRunAction({ workflowId: "wf_1", runId: "run_1" })
+
+    expect(advanceExecution).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: "run_1",
+        orgId: "org_a",
+        workflowId: "wf_1",
+        event: "cancelled",
+      })
+    )
+  })
+
+  it("still stops the run when recording the cancellation fails", async () => {
+    advanceExecution.mockRejectedValue(new Error("connection reset"))
+
+    await expect(
+      cancelWorkflowRunAction({ workflowId: "wf_1", runId: "run_1" })
+    ).resolves.toBeUndefined()
     expect(cancelRun).toHaveBeenCalledWith("run_1")
   })
 
@@ -134,6 +192,7 @@ describe("cancelWorkflowRunAction", () => {
       ).rejects.toThrow("Run not found")
       expect(retrieveRun).not.toHaveBeenCalled()
       expect(cancelRun).not.toHaveBeenCalled()
+      expect(advanceExecution).not.toHaveBeenCalled()
     })
 
     it("when the run belongs to another workflow", async () => {
@@ -146,6 +205,7 @@ describe("cancelWorkflowRunAction", () => {
         cancelWorkflowRunAction({ workflowId: "wf_1", runId: "run_9" })
       ).rejects.toThrow("Run not found")
       expect(cancelRun).not.toHaveBeenCalled()
+      expect(advanceExecution).not.toHaveBeenCalled()
     })
 
     it("when the run is of another task", async () => {
@@ -158,6 +218,7 @@ describe("cancelWorkflowRunAction", () => {
         cancelWorkflowRunAction({ workflowId: "wf_1", runId: "run_9" })
       ).rejects.toThrow("Run not found")
       expect(cancelRun).not.toHaveBeenCalled()
+      expect(advanceExecution).not.toHaveBeenCalled()
     })
   })
 })
