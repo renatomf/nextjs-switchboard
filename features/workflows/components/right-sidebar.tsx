@@ -481,7 +481,7 @@ function RunControl({ workflowId }: { workflowId: string }) {
 
     startTransition(async () => {
       try {
-        await cancelWorkflowRunAction(activeRunId)
+        await cancelWorkflowRunAction({ workflowId, runId: activeRunId })
       } catch (error) {
         // Cancelling is the user's way out of a run that is misbehaving, so a
         // failure here leaves them stuck — worth a report, not just a toast.

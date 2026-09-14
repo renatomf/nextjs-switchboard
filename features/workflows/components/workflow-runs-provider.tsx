@@ -14,6 +14,7 @@ import type {
   RunStep,
   runWorkflowTask,
 } from "@/features/workflows/tasks/run-workflow"
+import { workflowRunTag } from "@/features/workflows/lib/run-ownership"
 import { toWorkflowRun } from "@/features/workflows/lib/to-workflow-run"
 
 type WorkflowRuns = ReturnType<
@@ -42,7 +43,7 @@ export function WorkflowRunsProvider({
   // Runs are tagged workflow:<id> when the Run button triggers them, so the tag
   // is the handle on "every run of this workflow" without tracking run ids.
   const { runs, error } = useRealtimeRunsWithTag<typeof runWorkflowTask>(
-    `workflow:${workflowId}`,
+    workflowRunTag(workflowId),
     {
       accessToken: publicAccessToken,
       // The payload is just the ids we already have on the client — no reason to

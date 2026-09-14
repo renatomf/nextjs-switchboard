@@ -11,6 +11,7 @@ import {
   planRequiredMessage,
   premiumNodeLabelsOnCanvas,
 } from "@/features/workflows/lib/premium-gate"
+import { workflowRunTag } from "@/features/workflows/lib/run-ownership"
 import { PlanRequired } from "@/features/workflows/components/plan-required"
 import { Room } from "@/features/workflows/components/room"
 import { WorkflowRunsProvider } from "@/features/workflows/components/workflow-runs-provider"
@@ -100,7 +101,7 @@ export default async function Page({
   // the browser can subscribe to this workflow's runs and nothing else. The
   // default expiry is 15 minutes, which is short for a canvas left open.
   const publicAccessToken = await triggerAuth.createPublicToken({
-    scopes: { read: { tags: [`workflow:${id}`] } },
+    scopes: { read: { tags: [workflowRunTag(id)] } },
     expirationTime: "1hr",
   })
 

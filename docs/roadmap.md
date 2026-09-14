@@ -31,7 +31,9 @@ As decisões ficam em [`docs/adr/`](adr/).
       formatação no CI, `.git-blame-ignore-revs` e o knip barrando código morto no CI
 - [ ] **A.3c** Dependabot para as GitHub Actions, para os SHAs fixados não envelhecerem
 - [ ] **A.4** Preview por PR: deploy de preview na Vercel + branch do Neon por PR
-- [ ] **A.5** Corrigir o IDOR do cancel (`runs.cancel` sem checar a org dona da run)
+- [x] **A.5** Corrigir o IDOR do cancel (`runs.cancel` sem checar a org dona da run): a action
+      prova a posse em dois passos (workflow da org, run do workflow), com a política
+      `isRunOfWorkflow` escrita em TDD e um teste de regressão de segurança na action
 - [ ] **A.6** Índice `(org_id, created_at)` em `workflows` (o `drizzle-kit` confirma: 0 índices)
 
 ## Fase B — Execution como núcleo
