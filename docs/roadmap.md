@@ -22,7 +22,7 @@ primeiro onde houver lógica), mostrar como verificar, e registrar um ADR quando
 
 - [x] **A.1** Vitest + testes de caracterização das partes puras (`validateGraph`, `interpolate`)
 - [x] **Extra** Next.js 16.2.6 → 16.3.5 por alertas críticos de segurança (achado da A.1)
-- [ ] **A.2** Testes das demais partes puras (`premium-gate`, `toWorkflowRun`)
+- [x] **A.2** Testes das demais partes puras (`premium-gate`, `toWorkflowRun`)
 - [ ] **A.3** CI no GitHub Actions: lint, typecheck, test, build, migration pendente e `npm audit`
 - [ ] **A.4** Preview por PR: deploy de preview na Vercel + branch do Neon por PR
 - [ ] **A.5** Corrigir o IDOR do cancel (`runs.cancel` sem checar a org dona da run)
