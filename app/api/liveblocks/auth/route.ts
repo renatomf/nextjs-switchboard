@@ -27,7 +27,7 @@ export async function POST() {
     {
       userId,
       groupIds: [orgId],
-      organizationId: orgId
+      organizationId: orgId,
     },
     {
       userInfo: {

@@ -29,10 +29,7 @@ export async function POST(request: Request) {
     return new Response("Invalid JSON body", { status: 400 })
   }
 
-  if (
-    !Array.isArray(userIds) ||
-    userIds.some((id) => typeof id !== "string")
-  ) {
+  if (!Array.isArray(userIds) || userIds.some((id) => typeof id !== "string")) {
     Sentry.logger.warn("Liveblocks user resolution — malformed userIds", {
       orgId,
     })

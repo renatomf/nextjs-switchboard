@@ -59,7 +59,12 @@ export const nodeRegistry = {
     icon: Globe,
     accent: "bg-emerald-500 text-white",
     fields: [
-      { key: "url", label: "URL", placeholder: "https://youtube.com", required: true },
+      {
+        key: "url",
+        label: "URL",
+        placeholder: "https://youtube.com",
+        required: true,
+      },
       // { key: "description", label: "Description", placeholder: "Big text", multiline: true },
     ],
     outputs: [
@@ -134,7 +139,8 @@ export const nodeRegistry = {
       {
         key: "instruction",
         label: "Instruction",
-        placeholder: "Search for a laptop under $1000 and open the best rated result",
+        placeholder:
+          "Search for a laptop under $1000 and open the best rated result",
         multiline: true,
         required: true,
       },
@@ -198,7 +204,6 @@ export type StepNodeData = {
 
 export type StepNodeType = Node<StepNodeData, "step">
 
-
 export type ActionNodeType = {
   [K in NodeType]: (typeof nodeRegistry)[K]["kind"] extends "action" ? K : never
-} [NodeType]
+}[NodeType]

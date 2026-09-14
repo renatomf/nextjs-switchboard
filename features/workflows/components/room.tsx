@@ -30,7 +30,9 @@ export function Room({
 
           if (!response.ok) {
             Sentry.captureException(
-              new Error(`Resolving Liveblocks users failed (${response.status})`),
+              new Error(
+                `Resolving Liveblocks users failed (${response.status})`
+              ),
               { tags: { area: "liveblocks" }, extra: { userIds } }
             )
             return undefined

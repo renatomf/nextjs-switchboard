@@ -24,9 +24,15 @@ export const nodeExecutors: Partial<Record<NodeType, NodeExecutor>> = {
   act: async ({ values, getStagehand }) =>
     act({ stagehand: await getStagehand(), instruction: values.instruction }),
   extract: async ({ values, getStagehand }) =>
-    extract({ stagehand: await getStagehand(), instruction: values.instruction }),
+    extract({
+      stagehand: await getStagehand(),
+      instruction: values.instruction,
+    }),
   observe: async ({ values, getStagehand }) =>
-    observe({ stagehand: await getStagehand(), instruction: values.instruction }),
+    observe({
+      stagehand: await getStagehand(),
+      instruction: values.instruction,
+    }),
   agent: async ({ values, getStagehand }) =>
     agent({ stagehand: await getStagehand(), instruction: values.instruction }),
   // No getStagehand call, so this step runs without opening a browser session.
