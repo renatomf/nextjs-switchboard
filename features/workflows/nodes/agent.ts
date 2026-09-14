@@ -13,6 +13,11 @@ export async function agent({
 }) {
   const result = await stagehand.agent().execute(instruction)
 
+  // Stagehand does not throw when the agent fails: it returns success: false,
+  // with the reason in the message. Thrown here, so the step fails and the run
+  // with it, instead of reading as a finished step in a completed run.
+  if (!result.success) throw new Error(result.message)
+
   // success and completed answer different questions: whether the steps it took
   // worked, and whether it considers the goal actually finished. An agent that
   // gives up part-way can report success without completion.

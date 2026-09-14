@@ -72,11 +72,15 @@ function ReplayInspector({ run }: { run: WorkflowRun }) {
 }
 
 // The line to show where a result would be, for a step that has none. The step's
-// own status is the whole of it: started but not settled reads as waiting, and
-// never started reads as not run yet.
+// own status is the whole of it: stopped mid-step reads as stopped, started but
+// not settled as waiting, and never started as not run yet.
 function emptyNote(step: RunStep) {
   if (step.status === "skipped") {
     return "This is where the run starts, not a step it executes — there is nothing to show."
+  }
+
+  if (step.status === "cancelled") {
+    return "The run was stopped while this step was running."
   }
 
   if (step.status === "running") {

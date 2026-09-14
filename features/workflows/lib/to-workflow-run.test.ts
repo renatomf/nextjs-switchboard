@@ -88,7 +88,24 @@ describe("toWorkflowRun", () => {
   })
 
   describe("a stopped run", () => {
-    it("puts the interrupted step back to running and drops its error", () => {
+    it("keeps the step it was stopped on as cancelled", () => {
+      const steps = [
+        step("start", "done", { nodeType: "start" }),
+        step("a", "done"),
+        step("b", "cancelled"),
+        step("c", "pending"),
+      ]
+
+      const result = toWorkflowRun(
+        run({ isCancelled: true, metadata: { steps } })
+      )
+
+      expect(result.steps).toEqual(steps)
+    })
+
+    // Runs from before steps could record a cancel: the interrupted step wrote
+    // itself as failed, with the abort as its error.
+    it("reads an interrupted step recorded as failed as cancelled, without its error", () => {
       const result = toWorkflowRun(
         run({
           isCancelled: true,
@@ -106,9 +123,21 @@ describe("toWorkflowRun", () => {
       expect(result.steps).toEqual([
         step("start", "done", { nodeType: "start" }),
         step("a", "done"),
-        step("b", "running", { error: undefined }),
+        step("b", "cancelled", { error: undefined }),
         step("c", "pending"),
       ])
+    })
+
+    // The step's own cancel write can be lost like any other write.
+    it("reads a step still running as cancelled", () => {
+      const result = toWorkflowRun(
+        run({
+          isCancelled: true,
+          metadata: { steps: [step("a", "done"), step("b", "running")] },
+        })
+      )
+
+      expect(result.steps.map((s) => s.status)).toEqual(["done", "cancelled"])
     })
 
     it("does not get the failed-run repair painting a step red", () => {

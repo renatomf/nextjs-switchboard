@@ -48,8 +48,9 @@ As decisões ficam em [`docs/adr/`](adr/).
       transições protegidas por uma máquina de estados. Fecha o IDOR do replay
       ([ADR 0003](adr/0003-registro-de-execucoes.md)). A tabela de passos (`execution_steps`) fica
       para quando alguém precisar lê-los fora do realtime
-- [ ] **B.3** Aggregate `Execution`: a máquina de estados das execuções já existe (B.2); falta levar
-      o mesmo rigor aos passos, com o status `cancelled` no step
+- [x] **B.3** Máquina de estados dos passos (`step-status.ts`, em TDD). A task grava cada passo por
+      ela, o passo interrompido por um Stop vira `cancelled` na origem em vez de `failed`, e nenhum
+      passo começa depois de um Stop. O `toWorkflowRun` só traduz as runs gravadas antes disso
 - [ ] **B.4** Engine extraído da task, com ports `BrowserPort` e `ProgressReporter`
 - [ ] **B.5** Migrar para o Stagehand 4: construtor privado, sem `context`, e retornos novos em
       `observe` e `extract`. Vem depois da B.4, porque com o `BrowserPort` a troca fica num adapter só
@@ -112,3 +113,6 @@ bloco `current gaps` do arquivo de teste correspondente.
 | ~~Parar uma run deixava a sessão da Browserbase aberta, e cobrando, até o timeout de 5 minutos. O Trigger.dev derruba o worker antes do `finally` fechar o navegador, e um Stop durante a abertura nem deixava sessão a fechar~~ | `run-workflow.ts` | ✅ | Resolvido: `createBrowserSession` libera o navegador no cancelamento, e o `onCancel` espera a run |
 | Um limite de uso esgotado na Browserbase aparece como "Unknown error: 402", sem dizer o que fazer | `run-workflow.ts` | 🟡 | Backlog: traduzir para uma mensagem acionável |
 | As sessões que a API do Stagehand cria voltam com `keepAlive=true`, mesmo pedindo `false`. Se o worker cair sem cancelamento (crash, falta de memória), a sessão fica aberta até o timeout de 5 minutos | `run-workflow.ts` | 🟡 | C.5: a reconciliação também pode encerrar sessões órfãs |
+| ~~O nó Agent devolvia a falha do agente como resultado (`success: false`), e o passo aparecia como `done` numa run `COMPLETED`~~ | `agent.ts` | ✅ | Resolvido na B.3: o passo falha com a mensagem do agente |
+| O Agent falha em toda run desde 08/09 com "API key not valid". O modelo passou a ser `google/gemini-3.5-flash` sem chave, e a execução do agente não aceita esse caminho | `run-workflow.ts` | 🔴 | Decisão: dar ao modelo uma chave válida, ou tirar o Agent do ar |
+| O supervisor de limpeza do Stagehand não sobe no worker de desenvolvimento: o código dele vai para o bundle apesar do `external`, e o `cli.js` que ele procura fica de fora | `trigger.config.ts` | 🟡 | C.5, junto com as sessões órfãs |

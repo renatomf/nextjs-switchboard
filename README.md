@@ -78,6 +78,10 @@ e presença ao vivo — a mesma sensação de estar num arquivo do Figma.
 > O Neon entra com duas connection strings: a `DATABASE_URL` (com pool, via PgBouncer) para a
 > aplicação e a `DATABASE_URL_UNPOOLED` (direta) para as migrations. O PgBouncer trabalha em modo
 > transação e não aguenta operação de sessão.
+>
+> Nas duas, use `sslmode=verify-full` no lugar do `sslmode=require` que o painel do Neon entrega.
+> No `pg` 8 os dois verificam o certificado, mas no `pg` 9 o `require` passa a só criptografar,
+> sem verificar quem está do outro lado.
 
 ---
 

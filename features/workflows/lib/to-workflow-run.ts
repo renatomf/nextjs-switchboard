@@ -36,20 +36,21 @@ export function toWorkflowRun<Run extends RunSnapshot>(
   // still-running run should read as.
   const browserbaseSessionId = run.output?.browserbaseSessionId
 
-  // Stopping a run is not a failure and must not read as one. The step that was
-  // in flight when the stop landed still writes itself as failed on its way out
-  // — the executor's catch sees the abort like any other throw — so it goes back
-  // to "running": started, never settled. The message it wrote goes with it,
-  // since there is no error here to report. Everything behind it is already
-  // "pending", which is the same thing one step earlier.
+  // Stopping a run is not a failure and must not read as one. The task records
+  // the step it was stopped on as cancelled, and two older shapes still arrive
+  // here. Runs from before steps could say cancelled wrote the interrupted step
+  // as failed, with the abort as its error, and a cancel write that got lost
+  // leaves the step running. Both read as cancelled, without the abort's
+  // message, since there is no error here to report. Everything behind the
+  // step is pending: the run never reached it.
   //
   // Ahead of the repair below, which is deliberately not applied to a stopped
   // run: isFailed excludes CANCELED, so the two never both fire, and painting
   // the interrupted step red is exactly what this is undoing.
   if (run.isCancelled) {
     const stopped = steps.map((step) =>
-      step.status === "failed"
-        ? { ...step, status: "running" as const, error: undefined }
+      step.status === "failed" || step.status === "running"
+        ? { ...step, status: "cancelled" as const, error: undefined }
         : step
     )
 
