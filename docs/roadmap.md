@@ -63,9 +63,10 @@ As decisões ficam em [`docs/adr/`](adr/).
 - [x] **C.1** Concorrência por organização, conforme o plano: filas `runs-free` (1 por vez) e
       `runs-pro` (3), com a org como `concurrencyKey`. A run acima do limite espera como `queued`
       ([ADR 0006](adr/0006-concorrencia-por-org.md)). Uma run por workflow no Pro fica para a C.2
-- [x] **C.2** Uma run ao vivo por workflow: a action confere a org dona do workflow e, se ele já tem
-      uma run que não terminou no Trigger.dev, devolve essa run em vez de disparar outra. Não é
-      atômico: dois Runs no mesmo instante ainda podem passar (no Free, a fila da C.1 serializa)
+- [x] **C.2** Uma run ao vivo por workflow: a action confere a org dona do workflow e, sob uma trava
+      por workflow no Postgres (`pg_advisory_xact_lock`), devolve a run que ainda não terminou em vez
+      de disparar outra. A checagem lê a tabela `executions` e confirma a run pelo id no Trigger.dev.
+      Sem a trava, dois Runs com 1–2 s de diferença passavam (visto no teste com duas abas)
 - [ ] **C.3** Taxonomia de erros, retry por nó na mesma sessão, `AbortTaskRunError`, timeout por nó.
       Com os retries, a idempotência do Send Email (`idempotencyKey` da Resend = `runId:nodeId`)
 - [ ] **C.4** Testes de falha (browser fake que falha N vezes) e de dois Runs simultâneos
