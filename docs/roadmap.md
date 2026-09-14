@@ -29,13 +29,15 @@ As decisões ficam em [`docs/adr/`](adr/).
 - [x] **A.3b** Limpeza e formatação: 42 componentes shadcn sem uso e as 7 dependências só deles,
       scaffolding de setup, `.gitattributes` com `eol=lf`, Prettier em todo o código, checagem de
       formatação no CI, `.git-blame-ignore-revs` e o knip barrando código morto no CI
-- [ ] **A.3c** Dependabot para as GitHub Actions, para os SHAs fixados não envelhecerem
-- [ ] **A.4** Preview por PR: deploy de preview na Vercel + branch do Neon por PR
+- [x] **A.3c** Dependabot para as actions e o npm, com grupos para o que precisa andar junto e um
+      período de espera para versões recém-publicadas
 - [x] **A.5** Corrigir o IDOR do cancel (`runs.cancel` sem checar a org dona da run): a action
       prova a posse em dois passos (workflow da org, run do workflow), com a política
       `isRunOfWorkflow` escrita em TDD e um teste de regressão de segurança na action
 - [x] **A.6** Índice `(org_id, created_at)` em `workflows`, para a listagem por org não varrer a tabela
       inteira (migration `0002`)
+- [x] **A.7** Remover o `db:push`: ele aplicou a `0001` sem registrá-la, e o `db:migrate` quebrou
+      ao tentar reaplicá-la. O schema agora só muda por `db:generate` + `db:migrate`
 
 ## Fase B — Execution como núcleo
 
@@ -63,6 +65,8 @@ As decisões ficam em [`docs/adr/`](adr/).
 
 ## Fase E — Evidência de produção
 
+- [ ] Preview por PR: deploy de preview na Vercel + branch do Neon por PR. Veio da antiga A.4:
+      depende de configurar os painéis da Vercel e do Neon e de chaves por ambiente, que esta fase monta
 - [ ] E2E com Playwright + Clerk testing, usando executor fake
 - [ ] Deploy de produção real (Clerk de produção, domínio na Resend, chave própria do modelo)
 - [ ] Métricas e SLOs: taxa de sucesso, p95 de duração, custo por execução
@@ -84,6 +88,7 @@ bloco `current gaps` do arquivo de teste correspondente.
 | ~~`npm run lint` falhava com 2 erros em código morto do shadcn e 2 avisos; o ESLint varria `.agents/`~~ | lint | ✅ | Resolvido na A.3 |
 | ~~As páginas de exemplo do Sentry iam para produção e geravam erros falsos para qualquer visitante~~ | `app/sentry-example-page` | ✅ | Resolvido na A.3b |
 | ~~20 arquivos fora do padrão do Prettier, com ruído de CRLF no Windows~~ | vários | ✅ | Resolvido na A.3b |
+| ~~A `0001` tinha sido aplicada com `db:push` e nunca registrada, então o `db:migrate` falhava ao reaplicá-la e desfazia a `0002`~~ | banco | ✅ | Resolvido: baseline da `0001` e A.7 |
 | `.claude/skills` guarda 13 skills como junções do Windows apontando para `.agents/skills`, onde o instalador de skills as mantém. Apagar a `.agents/` quebra essas skills do Claude | `.agents/`, `.claude/` | 🟡 | Saber que existe |
 | `npm audit` aponta 64 alertas (1 crítico, 11 altos, 52 moderados), todos em dependências transitivas ou na CLI do Trigger. Nas dependências de produção, que o CI bloqueia, são 6 altos e nenhum crítico | `package-lock.json` | 🟠 | O CI bloqueia só crítico em produção; acompanhar à parte |
 | A CLI do Trigger.dev (4.5.16, e também a 4.6.0) traz o `tar` 6.2.1 vulnerável pela cadeia `c12` 1.x → `giget` 1.x. O `giget` 2 já não usa `tar`, mas o Trigger ainda está preso ao `c12` 1.x. É o mesmo código que o `.mcp.json` já roda via `npx` | `trigger.dev` (devDependency) | 🟠 | Aceito; acompanhar a atualização upstream do `c12` |
