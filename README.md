@@ -622,6 +622,7 @@ neles para adicionar um nó.**
 | Script | O que faz |
 | --- | --- |
 | `dev` · `build` · `start` | O ciclo do Next.js |
+| `trigger:dev` · `trigger:deploy` | CLI do Trigger.dev, na mesma versão do SDK: sobe o worker local ou publica as tasks |
 | `lint` · `typecheck` | ESLint · `tsc --noEmit` |
 | `format` · `format:check` | Prettier: formata os arquivos, ou só confere (é o que o CI roda) |
 | `test` · `test:watch` | Vitest: uma rodada só, ou refazendo a cada alteração |
