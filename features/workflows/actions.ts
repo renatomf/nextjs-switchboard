@@ -21,6 +21,7 @@ import {
   planRequiredMessage,
   premiumNodeLabels,
 } from "@/features/workflows/lib/premium-gate"
+import { runQueueFor } from "@/features/workflows/lib/run-queues"
 import {
   isRunOfWorkflow,
   RUN_WORKFLOW_TASK_ID,
@@ -141,7 +142,9 @@ export async function runWorkflowAction({
   //
   // Checked before publishing so a rejected run doesn't persist the graph that
   // caused it.
-  if (!has({ plan: PRO_PLAN })) {
+  const isPro = has({ plan: PRO_PLAN })
+
+  if (!isPro) {
     // The graph in hand, not the saved one: the canvas is shared, so what is
     // about to run can hold a node that was never persisted.
     const premium = premiumNodeLabels(graph)
@@ -188,10 +191,15 @@ export async function runWorkflowAction({
     throw error
   })
 
+  // On its plan's queue, in that queue's copy for this org: one org's runs
+  // cannot take every slot, and a run past the plan's limit waits as queued
+  // instead of failing.
+  const placement = runQueueFor({ orgId, isPro })
+
   const handle = await tasks.trigger<typeof runWorkflowTask>(
     RUN_WORKFLOW_TASK_ID,
     { workflowId: id, orgId, versionId: version.id },
-    { tags: [workflowRunTag(id)] }
+    { tags: [workflowRunTag(id)], ...placement }
   )
 
   // The run's durable record, as queued. Not worth failing the Run button
@@ -217,6 +225,7 @@ export async function runWorkflowAction({
     workflowId: id,
     versionId: version.id,
     runId: handle.id,
+    queue: placement.queue,
     nodeCount: graph.nodes.length,
     edgeCount: graph.edges.length,
   })
