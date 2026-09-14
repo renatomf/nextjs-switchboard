@@ -1,27 +1,37 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-import { cancelWorkflowRunAction } from "./actions"
+import type { WorkflowGraph } from "@/lib/db/schema"
+import { cancelWorkflowRunAction, runWorkflowAction } from "./actions"
 
-// The action sits between three outside systems: Clerk says who is asking,
+// The actions sit between three outside systems: Clerk says who is asking,
 // Postgres whose workflow it is, Trigger.dev whose run it is. Each is faked at
-// its module boundary so the ownership logic in between runs for real.
-const { auth, getWorkflow, retrieveRun, cancelRun } = vi.hoisted(() => ({
+// its module boundary so the logic in between runs for real.
+const {
+  auth,
+  getWorkflow,
+  publishWorkflowVersion,
+  retrieveRun,
+  cancelRun,
+  triggerTask,
+} = vi.hoisted(() => ({
   auth: vi.fn(),
   getWorkflow: vi.fn(),
+  publishWorkflowVersion: vi.fn(),
   retrieveRun: vi.fn(),
   cancelRun: vi.fn(),
+  triggerTask: vi.fn(),
 }))
 
 vi.mock("@clerk/nextjs/server", () => ({ auth }))
 vi.mock("@trigger.dev/sdk", () => ({
   runs: { retrieve: retrieveRun, cancel: cancelRun },
-  tasks: { trigger: vi.fn() },
+  tasks: { trigger: triggerTask },
 }))
 vi.mock("@/features/workflows/data", () => ({
   getWorkflow,
+  publishWorkflowVersion,
   createWorkflow: vi.fn(),
   deleteWorkflow: vi.fn(),
-  saveWorkflowGraph: vi.fn(),
 }))
 vi.mock("@sentry/nextjs", () => ({
   getIsolationScope: () => ({ setAttributes: vi.fn() }),
@@ -30,6 +40,60 @@ vi.mock("@sentry/nextjs", () => ({
 }))
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }))
 vi.mock("next/navigation", () => ({ redirect: vi.fn() }))
+
+describe("runWorkflowAction", () => {
+  // What the canvas sends. The version it becomes is faked, so its contents
+  // do not matter here.
+  const graph: WorkflowGraph = { nodes: [], edges: [] }
+
+  beforeEach(() => {
+    auth.mockResolvedValue({ orgId: "org_a", has: () => true })
+    triggerTask.mockResolvedValue({ id: "run_1" })
+  })
+
+  it("publishes the graph as a version and runs exactly that version", async () => {
+    publishWorkflowVersion.mockResolvedValue({ id: "ver_1" })
+
+    await runWorkflowAction({ id: "wf_1", graph })
+
+    expect(publishWorkflowVersion).toHaveBeenCalledWith({
+      orgId: "org_a",
+      workflowId: "wf_1",
+      graph,
+    })
+    expect(triggerTask).toHaveBeenCalledWith(
+      "run-workflow",
+      { workflowId: "wf_1", orgId: "org_a", versionId: "ver_1" },
+      { tags: ["workflow:wf_1"] }
+    )
+  })
+
+  // The race this closes: a run used to read the workflow's latest graph when
+  // the worker got to it, so a second Run could swap the graph under a first
+  // one still waiting in the queue.
+  it("gives two runs in a row a version each", async () => {
+    publishWorkflowVersion
+      .mockResolvedValueOnce({ id: "ver_1" })
+      .mockResolvedValueOnce({ id: "ver_2" })
+
+    await runWorkflowAction({ id: "wf_1", graph })
+    await runWorkflowAction({ id: "wf_1", graph })
+
+    const versions = triggerTask.mock.calls.map(
+      ([, payload]) => payload.versionId
+    )
+    expect(versions).toEqual(["ver_1", "ver_2"])
+  })
+
+  it("starts no run when the version cannot be published", async () => {
+    publishWorkflowVersion.mockRejectedValue(new Error("Workflow not found"))
+
+    await expect(runWorkflowAction({ id: "wf_other", graph })).rejects.toThrow(
+      "Workflow not found"
+    )
+    expect(triggerTask).not.toHaveBeenCalled()
+  })
+})
 
 describe("cancelWorkflowRunAction", () => {
   // Org A is signed in and owns wf_1, whose run is run_1.

@@ -4,7 +4,10 @@ import { Stagehand } from "@browserbasehq/stagehand"
 import { nodeExecutors } from "@/features/workflows/nodes/node-executors"
 import type { NodeType } from "@/features/workflows/nodes/node-registry"
 import { interpolate } from "@/features/workflows/lib/interpolate"
-import { getWorkflow } from "@/features/workflows/data"
+import {
+  loadRunGraph,
+  type RunWorkflowPayload,
+} from "@/features/workflows/tasks/load-run-graph"
 
 // One node's progress and result, published under the run's "steps" metadata so
 // the canvas can follow along while the run is still going and the run console
@@ -63,11 +66,10 @@ export const runWorkflowTask = task({
   // actually happen here (a bad instruction, a retired model, an exhausted quota)
   // are not the kind a retry fixes. One attempt, and the run reports what broke.
   retry: { maxAttempts: 1 },
-  run: async ({ workflowId, orgId }: { workflowId: string; orgId: string }) => {
-    const workflow = await getWorkflow(orgId, workflowId)
-    if (!workflow?.graph) throw new Error(`Workflow ${workflowId} has no graph`)
-
-    const { nodes, edges } = workflow.graph
+  run: async (payload: RunWorkflowPayload) => {
+    // The graph this run was started with, not the workflow as it is now: see
+    // loadRunGraph.
+    const { nodes, edges } = await loadRunGraph(payload)
     const byId = new Map(nodes.map((n) => [n.id, n]))
 
     // Run only connected nodes — anything touching an edge. Orphans dropped on
@@ -80,7 +82,10 @@ export const runWorkflowTask = task({
       )
       .filter((id) => connected.has(id))
 
-    logger.log(`Running workflow ${workflow.name}`, { steps: order.length })
+    logger.log(`Running workflow ${payload.workflowId}`, {
+      versionId: payload.versionId,
+      steps: order.length,
+    })
 
     // Publish the whole plan up front so the canvas has every step from the
     // first frame. Every connected node is listed, including the ones with no

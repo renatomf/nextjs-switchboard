@@ -35,3 +35,30 @@ export const workflows = pgTable(
 )
 
 export type Workflow = typeof workflows.$inferSelect
+
+// One immutable snapshot of a workflow's graph per Run. The canvas keeps
+// changing in Liveblocks; a version is what a run actually executes, so a run
+// reads its own graph even when someone else hits Run a moment later.
+export const workflowVersions = pgTable(
+  "workflow_versions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workflowId: uuid("workflow_id")
+      .notNull()
+      .references(() => workflows.id, { onDelete: "cascade" }),
+    // Copied from the workflow so every query can be scoped by org, like the
+    // rest of the data layer, without a join.
+    orgId: text("org_id").notNull(),
+    graph: jsonb("graph").$type<WorkflowGraph>().notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    // Postgres does not index a foreign key on its own. Without this, deleting
+    // a workflow would scan every version to find the ones to cascade to. The
+    // created_at after it also serves a workflow's history, newest first.
+    index("workflow_versions_workflow_id_created_at_idx").on(
+      table.workflowId,
+      table.createdAt
+    ),
+  ]
+)

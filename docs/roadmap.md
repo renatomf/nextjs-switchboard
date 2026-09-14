@@ -41,8 +41,9 @@ As decisões ficam em [`docs/adr/`](adr/).
 
 ## Fase B — Execution como núcleo
 
-- [ ] **B.1** Versões imutáveis de workflow: rascunho no Liveblocks, versão publicada no Postgres.
+- [x] **B.1** Versões imutáveis de workflow: rascunho no Liveblocks, versão publicada no Postgres.
       Corrige a race condition entre salvar o grafo e a task lê-lo
+      ([ADR 0002](adr/0002-versoes-imutaveis-de-workflow.md))
 - [ ] **B.2** Tabelas `executions` e `execution_steps`, atualizadas pelos hooks do Trigger.dev.
       Corrige o IDOR do replay (hoje não há como ligar um `sessionId` a uma org)
 - [ ] **B.3** Aggregate `Execution` com state machine, em TDD; status `cancelled` no step
@@ -94,6 +95,6 @@ bloco `current gaps` do arquivo de teste correspondente.
 | A CLI do Trigger.dev (4.5.16, e também a 4.6.0) traz o `tar` 6.2.1 vulnerável pela cadeia `c12` 1.x → `giget` 1.x. O `giget` 2 já não usa `tar`, mas o Trigger ainda está preso ao `c12` 1.x. É o mesmo código que o `.mcp.json` já roda via `npx` | `trigger.dev` (devDependency) | 🟠 | Aceito; acompanhar a atualização upstream do `c12` |
 | O CI não reaproveita o cache de build do Next (`.next/cache`) | `ci.yml` | 🟡 | Otimização futura |
 | Depois de apagar uma rota, o `typecheck` local falha até o `next build` ou o `next dev` regenerar `.next/types` (no CI não acontece) | `tsconfig.json` | 🟡 | Saber que existe |
-| Uma aresta apontando para um nó inexistente passa no `validateGraph`, mas a run quebra no `toposort.array` com "Unknown node", antes de publicar qualquer step. Pode acontecer com edição concorrente no canvas | `validate-graph.ts`, `run-workflow.ts:76` | 🟠 | B.1 |
-| Um Start desconectado passa na validação: a run executa qualquer nó ligado a uma aresta, alcançável ou não a partir do Start | `validate-graph.ts`, `run-workflow.ts:75` | 🟡 | B.1 |
+| ~~Uma aresta apontando para um nó inexistente passava no `validateGraph`, mas a run quebrava no `toposort.array` com "Unknown node"~~ | `validate-graph.ts` | ✅ | Resolvido na B.1 |
+| ~~Um Start desconectado passava na validação, e a run executava passos que o Start não alcança~~ | `validate-graph.ts` | ✅ | Resolvido na B.1 |
 | `interpolate` não codifica valores usados dentro de uma URL: `a b&page=2` vira um parâmetro extra | `interpolate.ts` | 🟡 | Backlog |
