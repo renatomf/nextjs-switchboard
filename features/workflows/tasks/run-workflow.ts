@@ -1,9 +1,16 @@
-import { logger, metadata, task, type TaskRunContext } from "@trigger.dev/sdk"
+import {
+  logger,
+  metadata,
+  queue,
+  task,
+  type TaskRunContext,
+} from "@trigger.dev/sdk"
 import { Stagehand } from "@browserbasehq/stagehand"
 import {
   runSteps,
   type ProgressReporter,
 } from "@/features/workflows/engine/run-steps"
+import { RUN_QUEUES } from "@/features/workflows/lib/run-queues"
 import { nodeExecutors } from "@/features/workflows/nodes/node-executors"
 import { createBrowserSession } from "@/features/workflows/tasks/browser-session"
 import {
@@ -40,6 +47,12 @@ const metadataReporter: ProgressReporter = {
   },
 }
 
+// The queues the action sends runs to, one per plan. Declared here because
+// Trigger.dev only knows queues defined ahead of time, in the worker; the
+// action picks one by name through runQueueFor.
+export const freeRunsQueue = queue(RUN_QUEUES.free)
+export const proRunsQueue = queue(RUN_QUEUES.pro)
+
 // The Trigger.dev task the Run button fires. It loads the graph the run was
 // started with and hands it to the engine (runSteps), wired to the real
 // browser, the run's metadata and Trigger.dev's logger.
@@ -52,6 +65,10 @@ export const runWorkflowTask = task({
   // actually happen here (a bad instruction, a retired model, an exhausted quota)
   // are not the kind a retry fixes. One attempt, and the run reports what broke.
   retry: { maxAttempts: 1 },
+  // The tighter of the two plan queues, for a run triggered without one, such
+  // as by an app deployed before the queues existed. The action always names
+  // one.
+  queue: freeRunsQueue,
   // Each hook moves the run's row in the executions table, and none of them
   // throws (see trackExecution). The app covers what they cannot see: it
   // writes the row when it triggers the run, and records a cancel itself,

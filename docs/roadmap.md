@@ -54,12 +54,15 @@ As decisões ficam em [`docs/adr/`](adr/).
 - [x] **B.4** Motor de execução (`runSteps`) extraído da task, atrás de duas interfaces: navegador
       e progresso. 14 testes com dublês, inclusive o Stop entre dois passos
       ([ADR 0004](adr/0004-motor-de-execucao.md))
-- [ ] **B.5** Migrar para o Stagehand 4: construtor privado, sem `context`, e retornos novos em
-      `observe` e `extract`. Vem depois da B.4, porque com o `BrowserPort` a troca fica num adapter só
+- [ ] **B.5** Adiada ([ADR 0005](adr/0005-stagehand-4-adiado.md)). A premissa de que a troca para o
+      Stagehand 4 ficaria num adapter só não se confirmou: a v4 remove a API de agente. A migração
+      vai junto com a reconstrução do Agent, na Fase D. A v3 continua mantida
 
 ## Fase C — Confiabilidade
 
-- [ ] **C.1** Concorrência: `concurrencyKey` por workflow (limite 1) e por org, com limite por plano
+- [x] **C.1** Concorrência por organização, conforme o plano: filas `runs-free` (1 por vez) e
+      `runs-pro` (3), com a org como `concurrencyKey`. A run acima do limite espera como `queued`
+      ([ADR 0006](adr/0006-concorrencia-por-org.md)). Uma run por workflow no Pro fica para a C.2
 - [ ] **C.2** Idempotência no Run e no Send Email (`idempotencyKey` da Resend = `runId:nodeId`)
 - [ ] **C.3** Taxonomia de erros, retry por nó na mesma sessão, `AbortTaskRunError`, timeout por nó
 - [ ] **C.4** Testes de falha (browser fake que falha N vezes) e de dois Runs simultâneos
@@ -73,6 +76,8 @@ As decisões ficam em [`docs/adr/`](adr/).
 - [ ] Cofre de credenciais (criptografia envelope, segredo fora de log e de prompt)
 - [ ] Artifacts: screenshots e extrações em object storage
 - [ ] Metering e quotas por org, ligados ao Clerk Billing
+- [ ] Agent com ferramentas sobre o Vercel AI SDK, junto com a migração para o Stagehand 4
+      ([ADR 0005](adr/0005-stagehand-4-adiado.md))
 
 ## Fase E — Evidência de produção
 

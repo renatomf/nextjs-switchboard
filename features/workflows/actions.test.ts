@@ -71,7 +71,22 @@ describe("runWorkflowAction", () => {
     expect(triggerTask).toHaveBeenCalledWith(
       "run-workflow",
       { workflowId: "wf_1", orgId: "org_a", versionId: "ver_1" },
-      { tags: ["workflow:wf_1"] }
+      { tags: ["workflow:wf_1"], queue: "runs-pro", concurrencyKey: "org_a" }
+    )
+  })
+
+  // Every org gets its own copy of its plan's queue: one org's runs cannot
+  // take every slot, and a free org runs one workflow at a time.
+  it("runs a free org's workflow on the free queue, keyed by the org", async () => {
+    auth.mockResolvedValue({ orgId: "org_a", has: () => false })
+    publishWorkflowVersion.mockResolvedValue({ id: "ver_1" })
+
+    await runWorkflowAction({ id: "wf_1", graph })
+
+    expect(triggerTask).toHaveBeenCalledWith(
+      "run-workflow",
+      expect.anything(),
+      expect.objectContaining({ queue: "runs-free", concurrencyKey: "org_a" })
     )
   })
 
