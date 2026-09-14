@@ -69,7 +69,7 @@ e presença ao vivo — a mesma sensação de estar num arquivo do Figma.
 | **E-mail** | Resend `^6.26.0` |
 | **Replay em vídeo** | Browserbase Session Replay + `hls.js` `^1.7.2` |
 | **Error tracking** | Sentry `^10.73.0` — app, edge e worker, com source maps dos dois lados |
-| **Estilo / UI** | Tailwind CSS `^4`, Radix UI `^1.6.7`, Base UI `^1.7.0`, shadcn/ui `^4.20.1` |
+| **Estilo / UI** | Tailwind CSS `^4`, Radix UI `^1.6.7`, shadcn/ui `^4.20.1` |
 
 
 > No Next.js 16 o *Middleware* virou **Proxy** — daí o `proxy.ts` na raiz no lugar do
@@ -605,7 +605,6 @@ neles para adicionar um nó.**
 | Datas e durações | `date-fns` `^4.4.0` · `pretty-ms` `^9.3.1` |
 | Nomes de fluxo gerados | `unique-names-generator` `^4.7.1` |
 | Composição de classes e animações | `clsx` · `tailwind-merge` · `class-variance-authority` · `tw-animate-css` |
-| Componentes shadcn | `cmdk` · `vaul` · `input-otp` · `react-day-picker` · `recharts` |
 | Tooling | ESLint `^9` + `eslint-config-next` · Prettier `^3.8.3` + plugin Tailwind · Vitest `^5` · `tsx` · `dotenv` |
 
 ### O que deliberadamente não está aqui
