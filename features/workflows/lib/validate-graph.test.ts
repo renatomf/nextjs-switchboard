@@ -96,26 +96,52 @@ describe("validateGraph", () => {
     ])
   })
 
-  // Characterization tests: they pin down what validateGraph does today,
-  // gaps included. Fixing one of these is a deliberate change that updates the
-  // test in the same commit. See "Achados" in docs/roadmap.md.
-  describe("current gaps", () => {
-    it("accepts a graph whose Start is not connected to anything", () => {
+  // These started as characterization tests of two gaps. Each Run now saves
+  // its graph as a permanent version, so a graph the run cannot execute must
+  // not get that far.
+  describe("connections", () => {
+    it("rejects steps that Start does not reach", () => {
       const problems = validateGraph({
         nodes: [node("start", "trigger"), node("a"), node("b")],
         edges: [edge("a", "b")],
       })
 
+      expect(problems).toEqual([
+        "Some connected steps can't be reached from Start — connect them to the flow or remove their edges.",
+      ])
+    })
+
+    it("rejects a branch that Start does not lead to", () => {
+      const problems = validateGraph({
+        nodes: [node("start", "trigger"), node("a"), node("b"), node("c")],
+        edges: [edge("start", "a"), edge("b", "c")],
+      })
+
+      expect(problems).toEqual([
+        "Some connected steps can't be reached from Start — connect them to the flow or remove their edges.",
+      ])
+    })
+
+    it("accepts steps that fan out from Start", () => {
+      const problems = validateGraph({
+        nodes: [node("start", "trigger"), node("a"), node("b")],
+        edges: [edge("start", "a"), edge("start", "b")],
+      })
+
       expect(problems).toEqual([])
     })
 
-    it("accepts an edge pointing at a node that is not in the graph", () => {
+    // A concurrent edit on the shared canvas can delete a step while another
+    // user wires an edge to it. The run's toposort throws on that edge.
+    it("rejects an edge pointing at a step that is no longer on the canvas", () => {
       const problems = validateGraph({
         nodes: [node("start", "trigger"), node("a")],
         edges: [edge("start", "a"), edge("a", "deleted")],
       })
 
-      expect(problems).toEqual([])
+      expect(problems).toEqual([
+        "An edge points to a step that is no longer on the canvas — delete it before running.",
+      ])
     })
   })
 })
