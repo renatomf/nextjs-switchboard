@@ -4,6 +4,7 @@ import { Stagehand } from "@browserbasehq/stagehand"
 import { nodeExecutors } from "@/features/workflows/nodes/node-executors"
 import type { NodeType } from "@/features/workflows/nodes/node-registry"
 import { interpolate } from "@/features/workflows/lib/interpolate"
+import { createBrowserSession } from "@/features/workflows/tasks/browser-session"
 import {
   loadRunGraph,
   type RunWorkflowPayload,
@@ -80,14 +81,21 @@ export const runWorkflowTask = task({
     trackExecution(ctx.run.id, payload, "succeeded"),
   onFailure: ({ payload, ctx, error }) =>
     trackExecution(ctx.run.id, payload, "failed", error),
-  onCancel: ({ payload, ctx }) =>
-    trackExecution(ctx.run.id, payload, "cancelled"),
+  //
+  // The run's signal is what releases its browser on a cancel, but Trigger.dev
+  // kills the worker soon after. Waiting on the run here holds that off (up to
+  // 30 seconds, per the docs) until its finally has run. Its rejection is the
+  // cancel itself, so there is nothing to report.
+  onCancel: async ({ payload, ctx, runPromise }) => {
+    await trackExecution(ctx.run.id, payload, "cancelled")
+    await runPromise.catch(() => {})
+  },
   // Both parameters typed: with the second one left bare, the function turns
   // context-sensitive, TypeScript stops inferring the payload type from it, and
   // every hook above sees the payload as void.
   run: async (
     payload: RunWorkflowPayload,
-    { ctx }: { ctx: TaskRunContext }
+    { ctx, signal }: { ctx: TaskRunContext; signal: AbortSignal }
   ) => {
     // The graph this run was started with, not the workflow as it is now: see
     // loadRunGraph.
@@ -163,17 +171,14 @@ export const runWorkflowTask = task({
       }
     }
 
-    // The run owns one Browserbase session, opened lazily on the first browser
-    // step and reused by every later one, so the recording spans the whole flow.
-    let stagehand: Stagehand | undefined
     // The Browserbase session id, captured the moment the session opens so it can
     // be returned in the run's output — a panel reads it there to fetch the replay
     // once the run finishes and the recording is available.
     let browserbaseSessionId: string | undefined
 
-    const getStagehand = async () => {
-      if (stagehand) return stagehand
-
+    // Opens the run's Browserbase session. Only ever called through the browser
+    // below, which decides when and makes sure the session is released.
+    const openStagehand = async () => {
       const apiKey = process.env.BROWSERBASE_API_KEY
       if (!apiKey) throw new Error("BROWSERBASE_API_KEY is not set")
 
@@ -187,7 +192,7 @@ export const runWorkflowTask = task({
       // buys past them; it has to match the provider in the model name.
       const modelName = "google/gemini-3.5-flash"
 
-      stagehand = new Stagehand({
+      const stagehand = new Stagehand({
         // Runs the session on Browserbase rather than a local Chrome, and routes
         // act/extract/observe through their API — which is also what makes the
         // run show up under the session's Stagehand tab in the dashboard.
@@ -211,6 +216,11 @@ export const runWorkflowTask = task({
 
       return stagehand
     }
+
+    // The run owns one Browserbase session: opened on the first browser step,
+    // reused by every later one so the recording spans the whole flow, and
+    // released on the way out or the moment the run is cancelled.
+    const browser = createBrowserSession({ open: openStagehand, signal })
 
     // What each node returned, keyed by node id, so later nodes can reference it
     // through {{ nodeId.path }} placeholders in their own fields. Nodes run in
@@ -251,7 +261,7 @@ export const runWorkflowTask = task({
         const startedAt = Date.now()
 
         try {
-          outputs[id] = await executor({ values, getStagehand })
+          outputs[id] = await executor({ values, getStagehand: browser.get })
           // Logged per node, not just returned at the end. A run that throws
           // returns no output at all, so without this every result the run did
           // produce before it broke is lost. It also lands each result on the
@@ -288,8 +298,9 @@ export const runWorkflowTask = task({
       }
     } finally {
       // Closing releases the Browserbase session; there is no separate browser
-      // handle in v3, so this one call is the whole cleanup.
-      await stagehand?.close()
+      // handle in v3, so this one call is the whole cleanup. A no-op when a
+      // cancel got there first.
+      await browser.release()
     }
 
     // Returned as well as published: a completed run's output is guaranteed to

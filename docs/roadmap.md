@@ -108,3 +108,6 @@ bloco `current gaps` do arquivo de teste correspondente.
 | ~~Uma aresta apontando para um nó inexistente passava no `validateGraph`, mas a run quebrava no `toposort.array` com "Unknown node"~~ | `validate-graph.ts` | ✅ | Resolvido na B.1 |
 | ~~Um Start desconectado passava na validação, e a run executava passos que o Start não alcança~~ | `validate-graph.ts` | ✅ | Resolvido na B.1 |
 | `interpolate` não codifica valores usados dentro de uma URL: `a b&page=2` vira um parâmetro extra | `interpolate.ts` | 🟡 | Backlog |
+| ~~Parar uma run deixava a sessão da Browserbase aberta, e cobrando, até o timeout de 5 minutos. O Trigger.dev derruba o worker antes do `finally` fechar o navegador, e um Stop durante a abertura nem deixava sessão a fechar~~ | `run-workflow.ts` | ✅ | Resolvido: `createBrowserSession` libera o navegador no cancelamento, e o `onCancel` espera a run |
+| Um limite de uso esgotado na Browserbase aparece como "Unknown error: 402", sem dizer o que fazer | `run-workflow.ts` | 🟡 | Backlog: traduzir para uma mensagem acionável |
+| As sessões que a API do Stagehand cria voltam com `keepAlive=true`, mesmo pedindo `false`. Se o worker cair sem cancelamento (crash, falta de memória), a sessão fica aberta até o timeout de 5 minutos | `run-workflow.ts` | 🟡 | C.5: a reconciliação também pode encerrar sessões órfãs |
