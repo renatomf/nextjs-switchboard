@@ -19,6 +19,11 @@ import {
   planRequiredMessage,
   premiumNodeLabels,
 } from "@/features/workflows/lib/premium-gate"
+import {
+  isRunOfWorkflow,
+  RUN_WORKFLOW_TASK_ID,
+  workflowRunTag,
+} from "@/features/workflows/lib/run-ownership"
 import { PRO_PLAN, PlanRequiredError } from "@/lib/billing"
 import { getLiveblocks } from "@/lib/liveblocks"
 import { WorkflowGraph } from "@/lib/db/schema"
@@ -177,9 +182,9 @@ export async function runWorkflowAction({
   }
 
   const handle = await tasks.trigger<typeof runWorkflowTask>(
-    "run-workflow",
+    RUN_WORKFLOW_TASK_ID,
     { workflowId: id, orgId },
-    { tags: [`workflow:${id}`] }
+    { tags: [workflowRunTag(id)] }
   )
 
   // One wide event rather than a start/end pair: everything worth correlating
@@ -196,17 +201,44 @@ export async function runWorkflowAction({
   return handle
 }
 
-export async function cancelWorkflowRunAction(runId: string) {
+export async function cancelWorkflowRunAction({
+  workflowId,
+  runId,
+}: {
+  workflowId: string
+  runId: string
+}) {
   const { orgId } = await auth()
   if (!orgId) throw new Error("No active organization")
 
   Sentry.getIsolationScope().setAttributes({
     action: "cancelWorkflowRunAction",
     orgId,
+    workflowId,
     runId,
   })
 
+  // Every org's runs live in one Trigger.dev project, so a run id proves
+  // nothing on its own: anyone signed in who learned one could stop another
+  // org's run. Ownership is checked in two hops instead. The workflow has to
+  // belong to this org, which the data layer scopes by orgId, and the run has
+  // to belong to that workflow, which the tag stamped at trigger time says.
+  const workflow = await getWorkflow(orgId, workflowId)
+  const run = workflow ? await runs.retrieve(runId) : undefined
+
+  if (!run || !isRunOfWorkflow(run, workflowId)) {
+    // One answer for "not yours" and "not there", so a probe learns nothing
+    // about runs it cannot see. Logged because reaching this from the UI is
+    // not possible: the Stop button only offers the canvas's own live run.
+    Sentry.logger.warn("Workflow run cancel refused — not this org's run", {
+      orgId,
+      workflowId,
+      runId,
+    })
+    throw new Error("Run not found")
+  }
+
   await runs.cancel(runId)
 
-  Sentry.logger.info("Workflow run cancelled", { orgId, runId })
+  Sentry.logger.info("Workflow run cancelled", { orgId, workflowId, runId })
 }
