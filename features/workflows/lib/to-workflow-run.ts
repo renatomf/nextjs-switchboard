@@ -1,4 +1,4 @@
-import type { RunStep } from "@/features/workflows/tasks/run-workflow"
+import type { RunStep } from "@/features/workflows/engine/run-steps"
 
 // The fields of a Trigger.dev run that toWorkflowRun reads, and nothing more.
 // Typed this narrowly so it takes any run that carries them: the realtime

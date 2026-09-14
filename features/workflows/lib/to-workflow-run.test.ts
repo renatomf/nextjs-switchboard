@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import type { RunStep } from "@/features/workflows/tasks/run-workflow"
+import type { RunStep } from "@/features/workflows/engine/run-steps"
 import { toWorkflowRun, type RunSnapshot } from "./to-workflow-run"
 
 // A run in no particular state. Each test sets the flags it is about.
