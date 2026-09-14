@@ -58,7 +58,7 @@ e presença ao vivo — a mesma sensação de estar num arquivo do Figma.
 | --- | --- |
 | **Framework** | Next.js `16.2.6` (App Router, Turbopack), React `19.2.4`, TypeScript `^5` |
 | **Canvas de workflow** | React Flow — `@xyflow/react` `^12.11.6` |
-| **Colaboração em tempo real** | Liveblocks `^3.24.1` — `react-flow`, `react`, `react-ui`, `client`, `node` |
+| **Colaboração em tempo real** | Liveblocks `^3.24.1` — `react-flow`, `react`, `react-ui`, `node` |
 | **Camada de API** | Server Functions (`"use server"`) e Route Handlers nativos do Next |
 | **Jobs em background** | Trigger.dev `4.5.16` — execução durável + realtime · runtime `node-24` |
 | **Automação de navegador** | Browserbase `@browserbasehq/sdk` `^2.19.1` + Stagehand `^3.6.0` |
@@ -69,7 +69,7 @@ e presença ao vivo — a mesma sensação de estar num arquivo do Figma.
 | **E-mail** | Resend `^6.26.0` |
 | **Replay em vídeo** | Browserbase Session Replay + `hls.js` `^1.7.2` |
 | **Error tracking** | Sentry `^10.73.0` — app, edge e worker, com source maps dos dois lados |
-| **Estilo / UI** | Tailwind CSS `^4`, Radix UI `^1.6.7`, Base UI `^1.7.0`, shadcn/ui `^4.20.1` |
+| **Estilo / UI** | Tailwind CSS `^4`, Radix UI `^1.6.7`, shadcn/ui `^4.20.1` |
 
 
 > No Next.js 16 o *Middleware* virou **Proxy** — daí o `proxy.ts` na raiz no lugar do
@@ -602,10 +602,9 @@ neles para adicionar um nó.**
 | Avisos (toasts) | `sonner` `^2.0.8` |
 | Fecha conexão ociosa no Vercel Fluid | `@vercel/functions` `^3.9.5` |
 | Política de branches do Neon | `@neon/config` `^1.3.0` · `@neon/env` `^1.2.1` |
-| Datas e durações | `date-fns` `^4.4.0` · `pretty-ms` `^9.3.1` |
+| Durações | `pretty-ms` `^9.3.1` |
 | Nomes de fluxo gerados | `unique-names-generator` `^4.7.1` |
 | Composição de classes e animações | `clsx` · `tailwind-merge` · `class-variance-authority` · `tw-animate-css` |
-| Componentes shadcn | `cmdk` · `vaul` · `input-otp` · `react-day-picker` · `recharts` |
 | Tooling | ESLint `^9` + `eslint-config-next` · Prettier `^3.8.3` + plugin Tailwind · Vitest `^5` · `tsx` · `dotenv` |
 
 ### O que deliberadamente não está aqui
@@ -623,8 +622,10 @@ neles para adicionar um nó.**
 | Script | O que faz |
 | --- | --- |
 | `dev` · `build` · `start` | O ciclo do Next.js |
-| `lint` · `typecheck` · `format` | ESLint · `tsc --noEmit` · Prettier |
+| `lint` · `typecheck` | ESLint · `tsc --noEmit` |
+| `format` · `format:check` | Prettier: formata os arquivos, ou só confere (é o que o CI roda) |
 | `test` · `test:watch` | Vitest: uma rodada só, ou refazendo a cada alteração |
+| `knip` | Knip: arquivos, dependências e exports sem uso (também roda no CI) |
 | `db:generate` · `db:migrate` · `db:push` · `db:studio` | Drizzle Kit |
 
 ---

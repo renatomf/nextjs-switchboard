@@ -47,9 +47,10 @@ export async function AppSidebar({
           appearance={{
             elements: {
               rootBox: "w-full",
-              userButtonTrigger: "w-full justify-start group-data-[collapsible=icon]:justify-center",
+              userButtonTrigger:
+                "w-full justify-start group-data-[collapsible=icon]:justify-center",
               userButtonOuterIdentifier: "group-data-[collapsible=icon]:hidden",
-            }
+            },
           }}
         />
       </SidebarFooter>

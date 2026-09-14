@@ -7,7 +7,7 @@ import { useAuth } from "@clerk/nextjs"
 import { PRO_PLAN } from "@/lib/billing"
 
 // Where <PricingTable for="organization" /> lives.
-export const BILLING_PATH = "/billing"
+const BILLING_PATH = "/billing"
 
 export type ProPlan = {
   // False until Clerk has resolved the session — treat it as "don't know yet"

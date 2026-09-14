@@ -17,9 +17,14 @@ permissions:
 
 jobs:
   checks:
-    name: Lint, typecheck, tests, migrations, audit
+    name: Checks
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      # drizzle.config.ts insists on a database URL, and two steps load it: the
+      # migration check and knip, through its Drizzle plugin. Neither connects;
+      # generate only diffs the schema against drizzle/.
+      DATABASE_URL_UNPOOLED: postgres://ci:ci@localhost:5432/ci
     steps:
       # Actions are pinned to a commit SHA rather than a tag: a tag can be moved
       # to different code, a SHA cannot. The comment keeps the version readable.
@@ -44,6 +49,16 @@ jobs:
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: npm run lint
 
+      - name: Formatting
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: npm run format:check
+
+      # Unused files, dependencies and exports. What knip cannot see on its own
+      # (Trigger.dev entry files, shadcn component families) is in knip.jsonc.
+      - name: Dead code
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: npm run knip
+
       - name: Typecheck
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: npm run typecheck
@@ -53,13 +68,10 @@ jobs:
         run: npm test
 
       # Fails when lib/db/schema.ts changed without its migration being
-      # generated and committed. drizzle.config.ts insists on a database URL,
-      # but generate only diffs the schema against drizzle/ and never connects.
+      # generated and committed.
       - name: Migrations match the schema
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         timeout-minutes: 3
-        env:
-          DATABASE_URL_UNPOOLED: postgres://ci:ci@localhost:5432/ci
         run: |
           npm run db:generate
           if [ -n "$(git status --porcelain -- drizzle/)" ]; then

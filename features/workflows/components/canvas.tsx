@@ -12,21 +12,19 @@ import {
   type ColorMode,
   type Edge,
   NodeTypes,
-  Panel
+  Panel,
 } from "@xyflow/react"
 import { useLiveblocksFlow, Cursors } from "@liveblocks/react-flow"
 import { AvatarStack } from "@liveblocks/react-ui"
 
 import { useTheme } from "next-themes"
 
-
-import { StepNode } from "./step-node";
+import { StepNode } from "./step-node"
 import type { StepNodeType } from "../nodes/node-registry"
 
-import "@xyflow/react/dist/style.css";
-import "@liveblocks/react-ui/styles.css";
-import "@liveblocks/react-flow/styles.css";
-
+import "@xyflow/react/dist/style.css"
+import "@liveblocks/react-ui/styles.css"
+import "@liveblocks/react-flow/styles.css"
 
 const nodeTypes: NodeTypes = { step: StepNode }
 
@@ -37,9 +35,9 @@ const initialNodes: StepNodeType[] = [
     position: { x: 0, y: 0 },
     data: { type: "start", kind: "trigger", title: "Start", values: {} },
   },
-];
+]
 
-const initialEdges: Edge[] = [];
+const initialEdges: Edge[] = []
 
 const emptySubscribe = () => () => {}
 
@@ -52,11 +50,9 @@ function useMounted() {
   return useSyncExternalStore(
     emptySubscribe,
     () => true,
-    () => false,
+    () => false
   )
 }
-
-
 
 export function Canvas() {
   const mounted = useMounted()
@@ -64,18 +60,12 @@ export function Canvas() {
 
   // Storage-backed flow state. Suspends until Storage is ready — the
   // ClientSideSuspense boundary in <Room> covers this component.
-  const {
-    nodes,
-    edges,
-    onNodesChange,
-    onEdgesChange,
-    onConnect,
-    onDelete,
-  } = useLiveblocksFlow<StepNodeType, Edge>({
-    suspense: true,
-    nodes: { initial: initialNodes },
-    edges: { initial: initialEdges },
-  })
+  const { nodes, edges, onNodesChange, onEdgesChange, onConnect, onDelete } =
+    useLiveblocksFlow<StepNodeType, Edge>({
+      suspense: true,
+      nodes: { initial: initialNodes },
+      edges: { initial: initialEdges },
+    })
 
   // React Flow resolves "system" with matchMedia during render, which differs
   // between server and client. Pin to light until mounted so both agree.
@@ -96,9 +86,9 @@ export function Canvas() {
         fitView
         connectionLineType={ConnectionLineType.SmoothStep}
         connectionLineStyle={{ stroke: "var(--border)", strokeWidth: 2 }}
-        defaultEdgeOptions={{ 
+        defaultEdgeOptions={{
           type: "smoothstep",
-          style: { stroke: "var(--border)", strokeWidth: 2 }
+          style: { stroke: "var(--border)", strokeWidth: 2 },
         }}
         style={
           {

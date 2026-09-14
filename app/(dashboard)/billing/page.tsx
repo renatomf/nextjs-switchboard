@@ -22,7 +22,7 @@ export default async function Page() {
       <div className="mx-auto flex max-w-5xl flex-col gap-8 p-8">
         <div className="flex flex-col gap-2">
           <h1 className="text-2xl font-semibold tracking-tight">Plans</h1>
-          <p className="text-muted-foreground text-sm">
+          <p className="text-sm text-muted-foreground">
             Choose the plan for your organization. Everyone in the organization
             shares its subscription.
           </p>

@@ -1,0 +1,30 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    // Trigger.dev has no Knip plugin: it finds tasks by scanning the dirs in
+    // trigger.config.ts and loads features/init.ts on its own, so nothing
+    // imports these.
+    "trigger.config.ts",
+    "features/init.ts",
+    "features/**/tasks/*.ts",
+    // Declares the global Liveblocks types. TypeScript reads it through
+    // tsconfig.json rather than through an import.
+    "liveblocks.config.ts",
+    // Neon config-as-code, read by the Neon tooling.
+    "neon.ts"
+  ],
+  // Skill bundles with templates and scripts written for other projects.
+  // .agents/ holds the originals and .claude/skills links to them. On Windows
+  // those links are junctions, which knip does not follow, so a local run
+  // calls ignoring .claude unnecessary; a clean checkout (CI) has real files
+  // there, and knip reports them.
+  "ignore": [".agents/**", ".claude/**"],
+  // The neon-env CLI, run from the terminal rather than imported.
+  "ignoreDependencies": ["@neon/env"],
+  // shadcn exports each component's whole family (DropdownMenuSub,
+  // SheetFooter...) by design. The parts this app does not use yet are not
+  // dead code.
+  "ignoreIssues": {
+    "components/ui/**": ["exports", "types"]
+  }
+}

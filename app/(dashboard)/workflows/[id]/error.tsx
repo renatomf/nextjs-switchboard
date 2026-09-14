@@ -51,7 +51,7 @@ export default function Error({
           Try again
         </Button>
         {error.digest ? (
-          <p className="text-muted-foreground font-mono text-xs">
+          <p className="font-mono text-xs text-muted-foreground">
             {error.digest}
           </p>
         ) : null}

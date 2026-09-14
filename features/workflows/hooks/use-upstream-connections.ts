@@ -42,7 +42,11 @@ export function useUpstreamConnections(): UpstreamConnection[] {
 
     while (queue.length) {
       const current = queue.shift()!
-      for (const incomer of getIncomers(current, nodes, edges) as StepNodeType[]) {
+      for (const incomer of getIncomers(
+        current,
+        nodes,
+        edges
+      ) as StepNodeType[]) {
         if (seen.has(incomer.id)) continue
         seen.add(incomer.id)
         ancestors.push(incomer)

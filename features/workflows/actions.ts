@@ -13,7 +13,7 @@ import {
   createWorkflow,
   deleteWorkflow,
   getWorkflow,
-  saveWorkflowGraph
+  saveWorkflowGraph,
 } from "@/features/workflows/data"
 import {
   planRequiredMessage,
@@ -109,7 +109,7 @@ export async function deleteWorkflowAction(workflowId: string) {
 
 export async function runWorkflowAction({
   id,
-  graph
+  graph,
 }: {
   id: string
   graph: WorkflowGraph
@@ -179,7 +179,7 @@ export async function runWorkflowAction({
   const handle = await tasks.trigger<typeof runWorkflowTask>(
     "run-workflow",
     { workflowId: id, orgId },
-    { tags: [`workflow:${id}`] },
+    { tags: [`workflow:${id}`] }
   )
 
   // One wide event rather than a start/end pair: everything worth correlating

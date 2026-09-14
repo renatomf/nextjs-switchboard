@@ -6,7 +6,9 @@
 import * as Sentry from "@sentry/nextjs"
 
 Sentry.init({
-  dsn: process.env.SENTRY_DSN ?? "https://86ff20d901da2809a228a72a4bc3b5e8@o4510082957180928.ingest.us.sentry.io/4512051355385856",
+  dsn:
+    process.env.SENTRY_DSN ??
+    "https://86ff20d901da2809a228a72a4bc3b5e8@o4510082957180928.ingest.us.sentry.io/4512051355385856",
 
   // 100% of traces in dev, 10% in production.
   tracesSampleRate: process.env.NODE_ENV === "development" ? 1.0 : 0.1,
