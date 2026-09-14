@@ -48,8 +48,9 @@ As decisões ficam em [`docs/adr/`](adr/).
       transições protegidas por uma máquina de estados. Fecha o IDOR do replay
       ([ADR 0003](adr/0003-registro-de-execucoes.md)). A tabela de passos (`execution_steps`) fica
       para quando alguém precisar lê-los fora do realtime
-- [ ] **B.3** Aggregate `Execution`: a máquina de estados das execuções já existe (B.2); falta levar
-      o mesmo rigor aos passos, com o status `cancelled` no step
+- [x] **B.3** Máquina de estados dos passos (`step-status.ts`, em TDD). A task grava cada passo por
+      ela, o passo interrompido por um Stop vira `cancelled` na origem em vez de `failed`, e nenhum
+      passo começa depois de um Stop. O `toWorkflowRun` só traduz as runs gravadas antes disso
 - [ ] **B.4** Engine extraído da task, com ports `BrowserPort` e `ProgressReporter`
 - [ ] **B.5** Migrar para o Stagehand 4: construtor privado, sem `context`, e retornos novos em
       `observe` e `extract`. Vem depois da B.4, porque com o `BrowserPort` a troca fica num adapter só
