@@ -60,7 +60,9 @@ As decisões ficam em [`docs/adr/`](adr/).
 
 ## Fase C — Confiabilidade
 
-- [ ] **C.1** Concorrência: `concurrencyKey` por workflow (limite 1) e por org, com limite por plano
+- [x] **C.1** Concorrência por organização, conforme o plano: filas `runs-free` (1 por vez) e
+      `runs-pro` (3), com a org como `concurrencyKey`. A run acima do limite espera como `queued`
+      ([ADR 0006](adr/0006-concorrencia-por-org.md)). Uma run por workflow no Pro fica para a C.2
 - [ ] **C.2** Idempotência no Run e no Send Email (`idempotencyKey` da Resend = `runId:nodeId`)
 - [ ] **C.3** Taxonomia de erros, retry por nó na mesma sessão, `AbortTaskRunError`, timeout por nó
 - [ ] **C.4** Testes de falha (browser fake que falha N vezes) e de dois Runs simultâneos
