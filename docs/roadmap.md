@@ -34,7 +34,8 @@ As decisões ficam em [`docs/adr/`](adr/).
 - [x] **A.5** Corrigir o IDOR do cancel (`runs.cancel` sem checar a org dona da run): a action
       prova a posse em dois passos (workflow da org, run do workflow), com a política
       `isRunOfWorkflow` escrita em TDD e um teste de regressão de segurança na action
-- [ ] **A.6** Índice `(org_id, created_at)` em `workflows` (o `drizzle-kit` confirma: 0 índices)
+- [x] **A.6** Índice `(org_id, created_at)` em `workflows`, para a listagem por org não varrer a tabela
+      inteira (migration `0002`)
 
 ## Fase B — Execution como núcleo
 
