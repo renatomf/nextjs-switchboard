@@ -625,6 +625,7 @@ neles para adicionar um nó.**
 | `lint` · `typecheck` | ESLint · `tsc --noEmit` |
 | `format` · `format:check` | Prettier: formata os arquivos, ou só confere (é o que o CI roda) |
 | `test` · `test:watch` | Vitest: uma rodada só, ou refazendo a cada alteração |
+| `knip` | Knip: arquivos, dependências e exports sem uso (também roda no CI) |
 | `db:generate` · `db:migrate` · `db:push` · `db:studio` | Drizzle Kit |
 
 ---

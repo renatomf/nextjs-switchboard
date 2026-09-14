@@ -28,7 +28,7 @@ As decisões ficam em [`docs/adr/`](adr/).
       ([ADR 0001](adr/0001-pipeline-de-ci.md)). Verde no PR #1 e na `main`
 - [x] **A.3b** Limpeza e formatação: 42 componentes shadcn sem uso e as 7 dependências só deles,
       scaffolding de setup, `.gitattributes` com `eol=lf`, Prettier em todo o código, checagem de
-      formatação no CI e `.git-blame-ignore-revs`
+      formatação no CI, `.git-blame-ignore-revs` e o knip barrando código morto no CI
 - [ ] **A.3c** Dependabot para as GitHub Actions, para os SHAs fixados não envelhecerem
 - [ ] **A.4** Preview por PR: deploy de preview na Vercel + branch do Neon por PR
 - [ ] **A.5** Corrigir o IDOR do cancel (`runs.cancel` sem checar a org dona da run)
@@ -81,6 +81,7 @@ bloco `current gaps` do arquivo de teste correspondente.
 | ~~`npm run lint` falhava com 2 erros em código morto do shadcn e 2 avisos; o ESLint varria `.agents/`~~ | lint | ✅ | Resolvido na A.3 |
 | ~~As páginas de exemplo do Sentry iam para produção e geravam erros falsos para qualquer visitante~~ | `app/sentry-example-page` | ✅ | Resolvido na A.3b |
 | ~~20 arquivos fora do padrão do Prettier, com ruído de CRLF no Windows~~ | vários | ✅ | Resolvido na A.3b |
+| `.claude/skills` guarda 13 skills como junções do Windows apontando para `.agents/skills`, onde o instalador de skills as mantém. Apagar a `.agents/` quebra essas skills do Claude | `.agents/`, `.claude/` | 🟡 | Saber que existe |
 | `npm audit` aponta 59 alertas (8 altos, 51 moderados, nenhum crítico), todos em dependências transitivas | `package-lock.json` | 🟠 | O CI bloqueia só crítico; acompanhar à parte |
 | O CI não reaproveita o cache de build do Next (`.next/cache`) | `ci.yml` | 🟡 | Otimização futura |
 | Depois de apagar uma rota, o `typecheck` local falha até o `next build` ou o `next dev` regenerar `.next/types` (no CI não acontece) | `tsconfig.json` | 🟡 | Saber que existe |
