@@ -29,6 +29,22 @@ updates:
     commit-message:
       prefix: chore
       include: scope
+    # Major updates that call for a decision rather than a merge. Security
+    # updates still come through for these. Drop an entry once its reason no
+    # longer holds.
+    ignore:
+      # Types have to match the Node runtime, which is 24 (the Trigger.dev
+      # worker and CI). Newer types would let code call APIs production lacks.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      # TypeScript 7 typechecks and builds this project, but typescript-eslint
+      # does not run on it yet: lint crashes. See docs/roadmap.md.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      # Stagehand 4 changes the API every node executor uses. That is a planned
+      # migration (B.5 in docs/roadmap.md), not a dependency bump.
+      - dependency-name: "@browserbasehq/stagehand"
+        update-types: ["version-update:semver-major"]
     # Groups are matched in order, so the lockstep ones come first.
     groups:
       # These have to move together: the Trigger.dev CLI warns when its version
