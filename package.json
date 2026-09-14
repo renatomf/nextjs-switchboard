@@ -79,7 +79,7 @@
     "tailwindcss": "^4",
     "trigger.dev": "4.5.16",
     "tsx": "^4.23.13",
-    "typescript": "^5",
+    "typescript": "^7",
     "vite": "^8.3.0",
     "vitest": "^5.0.0"
   }
