@@ -62,7 +62,7 @@ e presença ao vivo — a mesma sensação de estar num arquivo do Figma.
 | **Camada de API** | Server Functions (`"use server"`) e Route Handlers nativos do Next |
 | **Jobs em background** | Trigger.dev `4.5.16` — execução durável + realtime · runtime `node-24` |
 | **Automação de navegador** | Browserbase `@browserbasehq/sdk` `^2.19.1` + Stagehand `^3.6.0` |
-| **Integração de IA** | `google/gemini-3.5-flash`, roteado pelo Stagehand — `act` · `extract` · `observe` · `agent` |
+| **Integração de IA** | `anthropic/claude-opus-4-8` com a `CLAUDE_API_KEY` (trocável por `STAGEHAND_MODEL`), roteado pelo Stagehand — `act` · `extract` · `observe` · `agent` |
 | **Banco de dados** | Neon Postgres + Drizzle ORM `^0.45.2` (`drizzle-kit` `^0.31.10`, driver `pg` `^8.23.0`) |
 | **Auth** | Clerk `^7.9.1` — Organizations, multi-tenancy, session tasks |
 | **Billing** | Clerk Billing — `@clerk/ui` `^1.32.2`, `PricingTable` e checkout in-app |
@@ -317,7 +317,7 @@ flowchart TB
     Banco[("🐘 Neon Postgres<br/>workflow_versions e executions<br/>versão imutável e registro de cada run")]
 
     subgraph Worker["🔵 Trigger.dev · task run-workflow"]
-        Topo["toposort<br/>ordem de dependência"]
+        Topo["runSteps · o motor<br/>ordem de dependência e estados"]
         Interp["interpola os campos<br/>com o que já rodou"]
         Exec["nodeExecutors<br/>um por tipo de nó"]
         Meta["metadata.set steps<br/>estado de cada etapa"]
@@ -325,7 +325,7 @@ flowchart TB
 
     subgraph BB["🌐 Browserbase · Stagehand v3"]
         Sessao["Sessão de navegador<br/>uma só por execução"]
-        Modelo["google/gemini-3.5-flash"]
+        Modelo["anthropic/claude-opus-4-8"]
         Grav["Gravação da sessão<br/>HLS"]
     end
 
@@ -553,13 +553,23 @@ features/
     │   ├── agent.ts                   o único nó premium
     │   └── send-email.ts              o único que não abre navegador
     │
+    ├── engine/
+    │   └── run-steps.ts               o motor: ordem, estados, falha e Stop
+    │
     ├── tasks/
-    │   └── run-workflow.ts            a task do Trigger.dev
+    │   ├── run-workflow.ts            a task do Trigger.dev: só monta as peças
+    │   ├── browser-session.ts         o navegador da run, liberado uma vez
+    │   ├── load-run-graph.ts          o grafo da versão que a run recebeu
+    │   └── execution-tracking.ts      os hooks gravam na tabela executions
     │
     ├── lib/
     │   ├── interpolate.ts             resolve os tokens de um nó para o outro
-    │   ├── validate-graph.ts          1 gatilho, tem aresta, sem ciclo
-    │   └── premium-gate.ts            nós premium na sala / no fluxo salvo
+    │   ├── validate-graph.ts          1 gatilho, arestas, ciclo, campos obrigatórios
+    │   ├── premium-gate.ts            nós premium na sala / no fluxo salvo
+    │   ├── step-status.ts             máquina de estados dos passos
+    │   ├── execution-status.ts        máquina de estados das execuções
+    │   ├── run-ownership.ts           a run pertence a este workflow?
+    │   └── to-workflow-run.ts         a run como o console lê
     │
     ├── hooks/
     │   ├── use-upstream-connections.ts   tokens disponíveis para o nó atual
@@ -582,7 +592,7 @@ features/
 lib/
 ├── billing.ts                         PRO_PLAN + PlanRequiredError
 ├── db/
-│   ├── schema.ts                      tabela workflows + WorkflowGraph
+│   ├── schema.ts                      workflows, workflow_versions e executions
 │   └── index.ts                       Drizzle, com o pool no globalThis
 ├── browserbase.ts                     SDK principal (só servidor)
 ├── liveblocks.ts                      cliente de servidor (sob demanda)
@@ -704,11 +714,11 @@ no cliente, e o `catch` de quem chamou dispararia **no caso de sucesso**. Quem n
 
 ## ⚠️ Limitações conhecidas
 
-- **O modelo roda numa camada gratuita compartilhada.** Sem chave de provedor, o Stagehand manda o
-  `google/gemini-3.5-flash` por um caminho gratuito com cota. `quota exceeded` (limite de 20) e
-  `this model is experiencing high demand` são esperados sob carga — é a camada gratuita falando, e
-  não a run quebrada. Uma chave própria passa por cima disso, e precisa ser do mesmo provedor que
-  aparece no nome do modelo.
+- **O modelo depende de uma chave própria da Anthropic.** Sem a `CLAUDE_API_KEY` no ambiente do
+  worker, o Agent falha com `API key not valid`: foi o que aconteceu de 08/09 a 14/09, com um
+  `google/gemini-3.5-flash` sem chave. As chamadas ao modelo são cobradas nessa chave, e o Agent é o
+  nó mais caro, porque faz várias chamadas por passo. Trocar o modelo pelo `STAGEHAND_MODEL` só
+  funciona com outro modelo `anthropic/`.
 - **Os e-mails saem do sandbox do Resend** (`onboarding@resend.dev`), que só entrega para o endereço
   dono da conta. Falta um domínio verificado para mandar e-mail para outra pessoa.
 - **O replay demora a aparecer.** A gravação só existe depois que a sessão fecha, e a Browserbase

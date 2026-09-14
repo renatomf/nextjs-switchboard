@@ -14,7 +14,7 @@ import {
   nodeRegistry,
   type NodeDefinition,
 } from "@/features/workflows/nodes/node-registry"
-import type { RunStep } from "@/features/workflows/tasks/run-workflow"
+import type { RunStep } from "@/features/workflows/engine/run-steps"
 
 interface InspectorPanelProps {
   selected: ConsoleSelection

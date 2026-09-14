@@ -10,10 +10,8 @@ import {
 import * as Sentry from "@sentry/nextjs"
 import { useRealtimeRunsWithTag } from "@trigger.dev/react-hooks"
 
-import type {
-  RunStep,
-  runWorkflowTask,
-} from "@/features/workflows/tasks/run-workflow"
+import type { RunStep } from "@/features/workflows/engine/run-steps"
+import type { runWorkflowTask } from "@/features/workflows/tasks/run-workflow"
 import { workflowRunTag } from "@/features/workflows/lib/run-ownership"
 import { toWorkflowRun } from "@/features/workflows/lib/to-workflow-run"
 

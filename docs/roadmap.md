@@ -51,7 +51,9 @@ As decisões ficam em [`docs/adr/`](adr/).
 - [x] **B.3** Máquina de estados dos passos (`step-status.ts`, em TDD). A task grava cada passo por
       ela, o passo interrompido por um Stop vira `cancelled` na origem em vez de `failed`, e nenhum
       passo começa depois de um Stop. O `toWorkflowRun` só traduz as runs gravadas antes disso
-- [ ] **B.4** Engine extraído da task, com ports `BrowserPort` e `ProgressReporter`
+- [x] **B.4** Motor de execução (`runSteps`) extraído da task, atrás de duas interfaces: navegador
+      e progresso. 14 testes com dublês, inclusive o Stop entre dois passos
+      ([ADR 0004](adr/0004-motor-de-execucao.md))
 - [ ] **B.5** Migrar para o Stagehand 4: construtor privado, sem `context`, e retornos novos em
       `observe` e `extract`. Vem depois da B.4, porque com o `BrowserPort` a troca fica num adapter só
 

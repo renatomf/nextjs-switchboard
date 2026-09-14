@@ -19,7 +19,7 @@ import {
   useRunHistory,
   type WorkflowRun,
 } from "@/features/workflows/components/workflow-runs-provider"
-import type { RunStep } from "@/features/workflows/tasks/run-workflow"
+import type { RunStep } from "@/features/workflows/engine/run-steps"
 import { cn } from "@/lib/utils"
 
 // What a click on a step row identifies. The run id is part of it because the
