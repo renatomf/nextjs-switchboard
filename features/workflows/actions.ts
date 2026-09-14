@@ -13,7 +13,7 @@ import {
   createWorkflow,
   deleteWorkflow,
   getWorkflow,
-  saveWorkflowGraph,
+  publishWorkflowVersion,
 } from "@/features/workflows/data"
 import {
   planRequiredMessage,
@@ -137,7 +137,7 @@ export async function runWorkflowAction({
   // added it. This is the last point that can stop it — the Trigger.dev task
   // runs without a Clerk session, so it has no has() to ask.
   //
-  // Checked before the save so a rejected run doesn't persist the graph that
+  // Checked before publishing so a rejected run doesn't persist the graph that
   // caused it.
   if (!has({ plan: PRO_PLAN })) {
     // The graph in hand, not the saved one: the canvas is shared, so what is
@@ -168,22 +168,27 @@ export async function runWorkflowAction({
     }
   }
 
-  // saveWorkflowGraph re-runs validateGraph as the save-time backstop, so this
-  // is also where a graph the client let through gets rejected.
-  try {
-    await saveWorkflowGraph({ orgId, id, graph })
-  } catch (error) {
-    Sentry.logger.warn("Workflow run blocked — graph validation failed", {
+  // The graph in hand becomes an immutable version, and the run gets that
+  // version rather than the workflow: the task reads exactly this graph, even
+  // if someone else hits Run before the worker gets to it. publishing re-runs
+  // validateGraph as the backstop, so this is also where a graph the client
+  // let through gets rejected.
+  const version = await publishWorkflowVersion({
+    orgId,
+    workflowId: id,
+    graph,
+  }).catch((error: unknown) => {
+    Sentry.logger.warn("Workflow run blocked — version not published", {
       orgId,
       workflowId: id,
       reason: error instanceof Error ? error.message : String(error),
     })
     throw error
-  }
+  })
 
   const handle = await tasks.trigger<typeof runWorkflowTask>(
     RUN_WORKFLOW_TASK_ID,
-    { workflowId: id, orgId },
+    { workflowId: id, orgId, versionId: version.id },
     { tags: [workflowRunTag(id)] }
   )
 
@@ -193,6 +198,7 @@ export async function runWorkflowAction({
   Sentry.logger.info("Workflow run started", {
     orgId,
     workflowId: id,
+    versionId: version.id,
     runId: handle.id,
     nodeCount: graph.nodes.length,
     edgeCount: graph.edges.length,
