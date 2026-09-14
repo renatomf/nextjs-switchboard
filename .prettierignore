@@ -5,3 +5,8 @@ node_modules/
 coverage/
 pnpm-lock.yaml
 .pnpm-store/
+.trigger/
+next-env.d.ts
+# Agent skill bundles installed by tooling, not code this app maintains.
+.agents/
+.claude/

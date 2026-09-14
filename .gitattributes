@@ -1,0 +1,4 @@
+# Store and check out text files with LF whatever core.autocrlf is set to on
+# the machine. Prettier enforces LF (.prettierrc), so a CRLF checkout on Windows
+# made every file read as unformatted.
+* text=auto eol=lf
