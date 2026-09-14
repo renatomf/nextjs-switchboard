@@ -1,5 +1,6 @@
 import toposort from "toposort"
 
+import { nodeRegistry } from "@/features/workflows/nodes/node-registry"
 import type { WorkflowGraph } from "@/lib/db/schema"
 
 // Every node the flow reaches by following edges out of `start`. Tracks what
@@ -73,6 +74,23 @@ export function validateGraph({ nodes, edges }: WorkflowGraph): string[] {
       problems.push(
         "Some connected steps can't be reached from Start — connect them to the flow or remove their edges."
       )
+    }
+  }
+
+  // Every step the run executes needs its required fields filled. An empty one
+  // reaches the executor as undefined, and the run then fails mid-way with an
+  // error from deep inside Stagehand instead of here, in words the user can act
+  // on. A step loose on the canvas is not executed, so it is not checked.
+  const executed = new Set(edges.flatMap((e) => [e.source, e.target]))
+  for (const node of nodes) {
+    if (!executed.has(node.id)) continue
+
+    for (const field of nodeRegistry[node.data.type]?.fields ?? []) {
+      if (field.required && !node.data.values?.[field.key]?.trim()) {
+        problems.push(
+          `Fill in "${field.label}" on ${node.data.title} before running.`
+        )
+      }
     }
   }
 
