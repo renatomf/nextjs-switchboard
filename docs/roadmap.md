@@ -21,6 +21,7 @@ primeiro onde houver lógica), mostrar como verificar, e registrar um ADR quando
 ## Fase A — Fundação
 
 - [x] **A.1** Vitest + testes de caracterização das partes puras (`validateGraph`, `interpolate`)
+- [x] **Extra** Next.js 16.2.6 → 16.3.5 por alertas críticos de segurança (achado da A.1)
 - [ ] **A.2** Testes das demais partes puras (`premium-gate`, `toWorkflowRun`)
 - [ ] **A.3** CI no GitHub Actions: lint, typecheck, test, build, migration pendente e `npm audit`
 - [ ] **A.4** Preview por PR: deploy de preview na Vercel + branch do Neon por PR
@@ -69,11 +70,9 @@ bloco `current gaps` do arquivo de teste correspondente.
 
 | Achado | Onde | Gravidade | Destino |
 | --- | --- | :-: | --- |
-| Next.js 16.2.6 tem 2 alertas críticos de RCE e vários altos (bypass de proxy, SSRF, DoS). Corrigido na 16.3.5, sem mudança de major | `package.json` | 🔴 | Próximo passo, antes da A.2 |
-| `npm audit` aponta 62 alertas (1 crítico, 10 altos, 51 moderados), todos em dependências que já existiam | `package-lock.json` | 🟠 | A.3 |
+| ~~Next.js 16.2.6 tem 2 alertas críticos de RCE e vários altos (bypass de proxy, SSRF, DoS)~~ | `package.json` | ✅ | Resolvido: Next 16.3.5, com versão exata |
+| `npm audit` aponta 59 alertas (8 altos, 51 moderados, nenhum crítico), todos em dependências que já existiam | `package-lock.json` | 🟠 | A.3 |
 | `npm run lint` falha com 2 erros que já existiam (`react-hooks/set-state-in-effect` em `components/ui/carousel.tsx` e `hooks/use-mobile.ts`) e 2 avisos de variável sem uso (`actions.ts:10`, `right-sidebar.tsx:556`). O ESLint também varre `.agents/` | lint | 🟡 | A.3 (bloqueia o CI) |
 | Uma aresta apontando para um nó inexistente passa no `validateGraph`, mas a run quebra no `toposort.array` com "Unknown node", antes de publicar qualquer step. Pode acontecer com edição concorrente no canvas | `validate-graph.ts`, `run-workflow.ts:76` | 🟠 | B.1 |
 | Um Start desconectado passa na validação: a run executa qualquer nó ligado a uma aresta, alcançável ou não a partir do Start | `validate-graph.ts`, `run-workflow.ts:75` | 🟡 | B.1 |
 | `interpolate` não codifica valores usados dentro de uma URL: `a b&page=2` vira um parâmetro extra | `interpolate.ts` | 🟡 | Backlog |
-
-_Encontrados na A.1._
