@@ -1,0 +1,47 @@
+# Keeps dependencies current. Every update arrives as a PR, so CI checks it
+# before anything reaches main.
+version: 2
+updates:
+  # The workflow actions are pinned to commit SHAs. Dependabot moves the SHA
+  # and its version comment together.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    # New releases wait a week: a hijacked release is usually caught and
+    # pulled within days.
+    cooldown:
+      default-days: 7
+    groups:
+      github-actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 5
+      semver-major-days: 14
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore
+      include: scope
+    # Groups are matched in order, so the lockstep ones come first.
+    groups:
+      # These have to move together: the Trigger.dev CLI warns when its version
+      # drifts from the SDK's, Next's ESLint config tracks Next, and React and
+      # React DOM must match.
+      trigger-dev:
+        patterns: ["trigger.dev", "@trigger.dev/*"]
+      next:
+        patterns: ["next", "eslint-config-next"]
+      react:
+        patterns: ["react", "react-dom", "@types/react", "@types/react-dom"]
+      # Everything else lands in one weekly PR for minor and patch bumps.
+      # Majors still come one per PR: they can break things and deserve their
+      # own look.
+      minor-and-patch:
+        update-types: ["minor", "patch"]
