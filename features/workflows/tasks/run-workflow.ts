@@ -4,6 +4,11 @@ import { Stagehand } from "@browserbasehq/stagehand"
 import { nodeExecutors } from "@/features/workflows/nodes/node-executors"
 import type { NodeType } from "@/features/workflows/nodes/node-registry"
 import { interpolate } from "@/features/workflows/lib/interpolate"
+import {
+  nextStepStatus,
+  type StepEvent,
+  type StepStatus,
+} from "@/features/workflows/lib/step-status"
 import { createBrowserSession } from "@/features/workflows/tasks/browser-session"
 import {
   loadRunGraph,
@@ -28,7 +33,7 @@ export type RunStep = {
   // flips straight to "done" as the walk passes it, so a finished run reads as
   // completed all the way through — and it is never "pending" in between, which
   // is what keeps a failed run's repair from painting the entry point red.
-  status: "pending" | "running" | "done" | "failed" | "skipped"
+  status: StepStatus
   // How long the executor took, in milliseconds. Set once the step settles, so
   // a failed step reports its time too.
   durationMs?: number
@@ -152,9 +157,25 @@ export const runWorkflowTask = task({
     // store holds too, so both sides always match and every update after the
     // first is silently discarded. A fresh array each time is what makes the
     // change visible to the diff, and so to the canvas.
-    const updateStep = (nodeId: string, patch: Partial<RunStep>) => {
+    //
+    // Every change goes through the step state machine. A move the step cannot
+    // take is a bug in the walk, not a reason to fail the run: it is logged and
+    // dropped, so a settled step keeps saying how it ended.
+    const updateStep = (
+      nodeId: string,
+      event: StepEvent,
+      patch: Partial<Omit<RunStep, "status">> = {}
+    ) => {
+      const from = steps.find((step) => step.nodeId === nodeId)?.status
+      const status = from && nextStepStatus(from, event)
+
+      if (!status) {
+        logger.warn("Step update refused", { nodeId, from, event })
+        return
+      }
+
       steps = steps.map((step) =>
-        step.nodeId === nodeId ? { ...step, ...patch } : step
+        step.nodeId === nodeId ? { ...step, ...patch, status } : step
       )
       publishSteps()
     }
@@ -229,6 +250,11 @@ export const runWorkflowTask = task({
 
     try {
       for (const id of order) {
+        // A Stop between two steps ends the walk here. Nothing starts once the
+        // run is cancelled, not even a step that needs no browser, like sending
+        // an email, and the steps not reached stay pending.
+        signal.throwIfAborted()
+
         const node = byId.get(id)!
         logger.log(`Running step: ${node.data.title}`)
         const executor = nodeExecutors[node.data.type]
@@ -238,11 +264,11 @@ export const runWorkflowTask = task({
         // run starting at the trigger and moving on rather than a first step
         // that reads as never run.
         if (!executor) {
-          updateStep(id, { status: "done" })
+          updateStep(id, "passed")
           continue
         }
 
-        updateStep(id, { status: "running" })
+        updateStep(id, "started")
         // Metadata is flushed on a background timer, so without forcing it here
         // "running" would be overwritten by "done" in memory before it was ever
         // pushed and the canvas would never show the step in flight.
@@ -273,25 +299,33 @@ export const runWorkflowTask = task({
             output: outputs[id],
           })
         } catch (error) {
-          updateStep(id, {
-            status: "failed",
-            durationMs: Date.now() - startedAt,
-            // A non-Error throw is rare but real (a rejected string, an object
-            // from a native binding), and it is exactly the case where losing
-            // the message leaves the console with nothing to show.
-            error: (error instanceof Error
-              ? error.message
-              : String(error)
-            ).slice(0, ERROR_CHAR_CAP),
-          })
+          const durationMs = Date.now() - startedAt
+
+          // A Stop reaches the step in flight as a throw like any other: the
+          // browser it was driving is closed under it. It is recorded as what
+          // it was, with no error, rather than as a failure the console would
+          // have to explain away.
+          if (signal.aborted) {
+            updateStep(id, "cancelled", { durationMs })
+          } else {
+            updateStep(id, "failed", {
+              durationMs,
+              // A non-Error throw is rare but real (a rejected string, an
+              // object from a native binding), and it is exactly the case where
+              // losing the message leaves the console with nothing to show.
+              error: (error instanceof Error
+                ? error.message
+                : String(error)
+              ).slice(0, ERROR_CHAR_CAP),
+            })
+          }
           // A thrown run returns no output, so this flush is the only way the
-          // failed state ever reaches the canvas.
+          // step's final state ever reaches the canvas.
           await flushSteps()
           throw error
         }
 
-        updateStep(id, {
-          status: "done",
+        updateStep(id, "succeeded", {
           durationMs: Date.now() - startedAt,
           output: clampOutput(outputs[id]),
         })
