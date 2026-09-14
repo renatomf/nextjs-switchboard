@@ -55,13 +55,6 @@ columns, narrow with `Pick<Row, ...>` / `Omit<Row, ...>` rather than redeclaring
 literal type. Don't add an insert type where `db.insert(...).values()` already
 enforces the shape.
 
-<!-- TRIGGER.DEV SKILLS START -->
-
-## Trigger.dev agent skills
-
-This project has Trigger.dev agent skills installed in `.agents/skills/`. Before writing or changing Trigger.dev code (background tasks, scheduled tasks, realtime, or chat.agent AI agents), load the most relevant skill: `trigger-authoring-chat-agent`, `trigger-authoring-tasks`, `trigger-chat-agent-advanced`, `trigger-cost-savings`, `trigger-getting-started`, `trigger-realtime-and-frontend`.
-<!-- TRIGGER.DEV SKILLS END -->
-
 # Stagehand Project
 
 This is a project that uses Stagehand V3, a browser automation framework with AI-powered `act`, `extract`, `observe`, and `agent` methods.
