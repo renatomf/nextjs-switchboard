@@ -417,22 +417,9 @@ function ActionsMenu({ workflowId }: { workflowId: string }) {
   )
 }
 
-// The pieces of a started run the status panel needs to subscribe to it.
-interface RunHandle {
-  id: string
-  publicAccessToken: string
-}
-
-// The header's run control: it starts a run of the current workflow, handing
-// the handle back to the sidebar so it can show the run's live status, and
-// while that run is going it turns into the Stop button that cancels it.
-function RunControl({
-  workflowId,
-  onStarted,
-}: {
-  workflowId: string
-  onStarted: (handle: RunHandle) => void
-}) {
+// The header's run control: it starts a run of the current workflow, and while
+// that run is going it turns into the Stop button that cancels it.
+function RunControl({ workflowId }: { workflowId: string }) {
   const { getNodes, getEdges } = useReactFlow<StepNodeType>()
   const [isPending, startTransition] = useTransition()
   // A workflow has at most one run going at a time, so this is the run Stop
@@ -470,7 +457,6 @@ function RunControl({
         const handle = await runWorkflowAction({ id: workflowId, graph })
 
         setStartedId(handle.id)
-        onStarted(handle)
       } catch (error) {
         Sentry.logger.error("Workflow run failed to start", {
           workflowId,
@@ -553,7 +539,6 @@ const tabTriggerClassName =
 
 export function RightSidebar({ workflowId }: { workflowId: string }) {
   const [tab, setTab] = useState("toolbar")
-  const [handle, setHandle] = useState<RunHandle | null>(null)
 
   // The currently selected node, read from the shared React Flow store.
   const selected = useStore((s) => s.nodes.find((n) => n.selected)) as
@@ -571,7 +556,7 @@ export function RightSidebar({ workflowId }: { workflowId: string }) {
       <Tabs value={tab} onValueChange={setTab} className="size-full gap-0">
         <div className="flex items-center justify-between border-b border-border p-2">
           <ActionsMenu workflowId={workflowId} />
-          <RunControl workflowId={workflowId} onStarted={setHandle} />
+          <RunControl workflowId={workflowId} />
         </div>
         <TabsList className="m-2 w-fit bg-background">
           <TabsTrigger value="toolbar" className={tabTriggerClassName}>

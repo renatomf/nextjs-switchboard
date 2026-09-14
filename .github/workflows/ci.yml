@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A newer push to the same branch or PR makes the checks still running on the
+# previous one pointless.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Read-only token: the pipeline checks code and never writes back to the repo.
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Lint, typecheck, tests, migrations, audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # Actions are pinned to a commit SHA rather than a tag: a tag can be moved
+      # to different code, a SHA cannot. The comment keeps the version readable.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Nothing here pushes, so the token is not left behind in .git.
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          # The Trigger.dev worker runs on node-24; Vitest 5 needs 22.12 or later.
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        id: install
+        run: npm ci
+
+      # Each check runs even when an earlier one failed, so one push reports
+      # every problem it has instead of one per round trip.
+      - name: Lint
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: npm run lint
+
+      - name: Typecheck
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: npm run typecheck
+
+      - name: Unit tests
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: npm test
+
+      # Fails when lib/db/schema.ts changed without its migration being
+      # generated and committed. drizzle.config.ts insists on a database URL,
+      # but generate only diffs the schema against drizzle/ and never connects.
+      - name: Migrations match the schema
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        timeout-minutes: 3
+        env:
+          DATABASE_URL_UNPOOLED: postgres://ci:ci@localhost:5432/ci
+        run: |
+          npm run db:generate
+          if [ -n "$(git status --porcelain -- drizzle/)" ]; then
+            echo "::error::lib/db/schema.ts changed without a migration. Run npm run db:generate and commit drizzle/."
+            git status --porcelain -- drizzle/
+            exit 1
+          fi
+
+      # Blocks on critical advisories in what ships to production. High and
+      # moderate ones sit in transitive dependencies and are tracked apart;
+      # see docs/adr/0001-pipeline-de-ci.md.
+      - name: Dependency audit
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: npm audit --audit-level=critical --omit=dev
+
+  build:
+    name: Production build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # No secrets on purpose: the build must not depend on runtime
+      # credentials, which is why every client in lib/ is created on first use.
+      # Without SENTRY_AUTH_TOKEN the Sentry plugin skips the source map upload.
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: 1

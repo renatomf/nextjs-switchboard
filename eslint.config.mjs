@@ -16,6 +16,10 @@ const eslintConfig = defineConfig([
     // `deploy`. It only exists after a worker has run, which is why linting
     // passed without it — and why it fails as soon as anyone starts the worker.
     ".trigger/**",
+    // Agent skill bundles installed by tooling: templates and helper scripts
+    // written for other projects, not code this app ships or maintains.
+    ".agents/**",
+    ".claude/**",
   ]),
 ]);
 

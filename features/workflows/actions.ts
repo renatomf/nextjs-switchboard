@@ -7,7 +7,6 @@ import { tasks, runs } from "@trigger.dev/sdk"
 import { revalidatePath } from "next/cache"
 import { redirect } from "next/navigation"
 
-import type { helloWorldTask } from "@/trigger/example"
 import type { runWorkflowTask } from "@/features/workflows/tasks/run-workflow"
 
 import {
