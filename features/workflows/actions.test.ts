@@ -14,6 +14,7 @@ const {
   advanceExecution,
   retrieveRun,
   cancelRun,
+  listRuns,
   triggerTask,
 } = vi.hoisted(() => ({
   auth: vi.fn(),
@@ -23,12 +24,13 @@ const {
   advanceExecution: vi.fn(),
   retrieveRun: vi.fn(),
   cancelRun: vi.fn(),
+  listRuns: vi.fn(),
   triggerTask: vi.fn(),
 }))
 
 vi.mock("@clerk/nextjs/server", () => ({ auth }))
 vi.mock("@trigger.dev/sdk", () => ({
-  runs: { retrieve: retrieveRun, cancel: cancelRun },
+  runs: { retrieve: retrieveRun, cancel: cancelRun, list: listRuns },
   tasks: { trigger: triggerTask },
 }))
 vi.mock("@/features/workflows/data", () => ({
@@ -52,10 +54,58 @@ describe("runWorkflowAction", () => {
   // do not matter here.
   const graph: WorkflowGraph = { nodes: [], edges: [] }
 
+  // Org A owns wf_1, which has no run going.
   beforeEach(() => {
     auth.mockResolvedValue({ orgId: "org_a", has: () => true })
+    getWorkflow.mockResolvedValue({ id: "wf_1", orgId: "org_a" })
+    listRuns.mockResolvedValue({ data: [] })
     triggerTask.mockResolvedValue({ id: "run_1" })
     recordExecution.mockResolvedValue(undefined)
+  })
+
+  // The canvas assumes a workflow has at most one run going: its Run button
+  // turns into Stop, and Stop reaches a single run. Two tabs, or two people on
+  // the shared canvas, used to start a second one anyway.
+  describe("one run going per workflow", () => {
+    it("hands back the run already going instead of starting another", async () => {
+      listRuns.mockResolvedValue({ data: [{ id: "run_live" }] })
+
+      await expect(runWorkflowAction({ id: "wf_1", graph })).resolves.toEqual({
+        id: "run_live",
+      })
+      expect(publishWorkflowVersion).not.toHaveBeenCalled()
+      expect(triggerTask).not.toHaveBeenCalled()
+      expect(recordExecution).not.toHaveBeenCalled()
+    })
+
+    it("only counts this workflow's runs that are still going", async () => {
+      publishWorkflowVersion.mockResolvedValue({ id: "ver_1" })
+
+      await runWorkflowAction({ id: "wf_1", graph })
+
+      expect(listRuns).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tag: "workflow:wf_1",
+          taskIdentifier: "run-workflow",
+          status: expect.arrayContaining(["QUEUED", "EXECUTING", "WAITING"]),
+        })
+      )
+      expect(listRuns.mock.calls[0][0].status).not.toContain("COMPLETED")
+    })
+
+    // Looking the runs up first would tell a caller holding another org's
+    // workflow id whether that workflow is running, and hand over its run id.
+    it("refuses another org's workflow before looking at its runs", async () => {
+      getWorkflow.mockResolvedValue(undefined)
+
+      await expect(
+        runWorkflowAction({ id: "wf_other", graph })
+      ).rejects.toThrow("Workflow not found")
+      expect(getWorkflow).toHaveBeenCalledWith("org_a", "wf_other")
+      expect(listRuns).not.toHaveBeenCalled()
+      expect(publishWorkflowVersion).not.toHaveBeenCalled()
+      expect(triggerTask).not.toHaveBeenCalled()
+    })
   })
 
   it("publishes the graph as a version and runs exactly that version", async () => {

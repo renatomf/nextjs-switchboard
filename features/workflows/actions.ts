@@ -31,6 +31,18 @@ import { PRO_PLAN, PlanRequiredError } from "@/lib/billing"
 import { getLiveblocks } from "@/lib/liveblocks"
 import { WorkflowGraph } from "@/lib/db/schema"
 
+// The statuses of a run that has not settled yet: waiting for its turn,
+// starting, executing, or paused at a wait. Every other status is how a run
+// ended.
+const LIVE_RUN_STATUSES = [
+  "PENDING_VERSION",
+  "QUEUED",
+  "DEQUEUED",
+  "EXECUTING",
+  "WAITING",
+  "DELAYED",
+] as const
+
 export async function createWorkflowAction(name: string) {
   const { orgId } = await auth()
 
@@ -171,6 +183,45 @@ export async function runWorkflowAction({
 
       throw error
     }
+  }
+
+  // Scoped to the org before anything else is looked up: the runs below are
+  // found by the workflow's id alone, so answering for another org's workflow
+  // would tell the caller whether it is running and hand over its run id.
+  const workflow = await getWorkflow(orgId, id)
+
+  if (!workflow) {
+    Sentry.logger.warn("Workflow run refused — not found", {
+      orgId,
+      workflowId: id,
+    })
+    throw new Error("Workflow not found")
+  }
+
+  // At most one run going per workflow. The canvas assumes it (Run turns into
+  // Stop, and Stop reaches a single run), so a second Run hands back the run
+  // already going instead of starting another. Trigger.dev is asked rather
+  // than the executions table, whose rows can be stuck in "running".
+  //
+  // Not atomic: two Runs landing in the same instant can both see none. A
+  // free org's queue runs one at a time anyway, and closing the gap for Pro
+  // would take a lock held across a call to Trigger.dev.
+  const {
+    data: [live],
+  } = await runs.list({
+    tag: workflowRunTag(id),
+    taskIdentifier: RUN_WORKFLOW_TASK_ID,
+    status: [...LIVE_RUN_STATUSES],
+    limit: 1,
+  })
+
+  if (live) {
+    Sentry.logger.info("Workflow run already going", {
+      orgId,
+      workflowId: id,
+      runId: live.id,
+    })
+    return { id: live.id }
   }
 
   // The graph in hand becomes an immutable version, and the run gets that
