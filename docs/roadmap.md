@@ -8,6 +8,7 @@ dá para apontar no código, ou se baratear uma mudança que vamos de fato fazer
 
 Cada passo segue o mesmo ciclo: explicar o problema, implementar em mudanças pequenas (com teste
 primeiro onde houver lógica), mostrar como verificar, e registrar um ADR quando houver decisão.
+As decisões ficam em [`docs/adr/`](adr/).
 
 | Após | Nota estimada |
 | --- | :-: |
@@ -24,9 +25,14 @@ primeiro onde houver lógica), mostrar como verificar, e registrar um ADR quando
 - [x] **Extra** Next.js 16.2.6 → 16.3.5 por alertas críticos de segurança (achado da A.1)
 - [x] **A.2** Testes das demais partes puras (`premium-gate`, `toWorkflowRun`)
 - [ ] **A.3** CI no GitHub Actions: lint, typecheck, test, build, migration pendente e `npm audit`
+      ([ADR 0001](adr/0001-pipeline-de-ci.md)). _Pronto e validado num checkout limpo; falta o
+      primeiro run verde no GitHub, depois do push._
+- [ ] **A.3b** Formatação: um commit só de Prettier, `.gitattributes` com `eol=lf` e checagem de
+      formatação no CI
+- [ ] **A.3c** Dependabot para as GitHub Actions, para os SHAs fixados não envelhecerem
 - [ ] **A.4** Preview por PR: deploy de preview na Vercel + branch do Neon por PR
 - [ ] **A.5** Corrigir o IDOR do cancel (`runs.cancel` sem checar a org dona da run)
-- [ ] **A.6** Índice `(org_id, created_at)` em `workflows`
+- [ ] **A.6** Índice `(org_id, created_at)` em `workflows` (o `drizzle-kit` confirma: 0 índices)
 
 ## Fase B — Execution como núcleo
 
@@ -71,8 +77,11 @@ bloco `current gaps` do arquivo de teste correspondente.
 | Achado | Onde | Gravidade | Destino |
 | --- | --- | :-: | --- |
 | ~~Next.js 16.2.6 tem 2 alertas críticos de RCE e vários altos (bypass de proxy, SSRF, DoS)~~ | `package.json` | ✅ | Resolvido: Next 16.3.5, com versão exata |
-| `npm audit` aponta 59 alertas (8 altos, 51 moderados, nenhum crítico), todos em dependências que já existiam | `package-lock.json` | 🟠 | A.3 |
-| `npm run lint` falha com 2 erros que já existiam (`react-hooks/set-state-in-effect` em `components/ui/carousel.tsx` e `hooks/use-mobile.ts`) e 2 avisos de variável sem uso (`actions.ts:10`, `right-sidebar.tsx:556`). O ESLint também varre `.agents/` | lint | 🟡 | A.3 (bloqueia o CI) |
+| ~~O build dependia de `DATABASE_URL`: `lib/db` lançava erro na importação, ao contrário dos outros clientes~~ | `lib/db/index.ts` | ✅ | Resolvido na A.3: `getDb()` no primeiro uso |
+| ~~`npm run lint` falhava com 2 erros em código morto do shadcn e 2 avisos; o ESLint varria `.agents/`~~ | lint | ✅ | Resolvido na A.3 |
+| `npm audit` aponta 59 alertas (8 altos, 51 moderados, nenhum crítico), todos em dependências transitivas | `package-lock.json` | 🟠 | O CI bloqueia só crítico; acompanhar à parte |
+| 20 arquivos do projeto fora do padrão do Prettier. No Windows, o `core.autocrlf` soma ruído de fim de linha | vários | 🟡 | A.3b |
+| O CI não reaproveita o cache de build do Next (`.next/cache`) | `ci.yml` | 🟡 | Otimização futura |
 | Uma aresta apontando para um nó inexistente passa no `validateGraph`, mas a run quebra no `toposort.array` com "Unknown node", antes de publicar qualquer step. Pode acontecer com edição concorrente no canvas | `validate-graph.ts`, `run-workflow.ts:76` | 🟠 | B.1 |
 | Um Start desconectado passa na validação: a run executa qualquer nó ligado a uma aresta, alcançável ou não a partir do Start | `validate-graph.ts`, `run-workflow.ts:75` | 🟡 | B.1 |
 | `interpolate` não codifica valores usados dentro de uma URL: `a b&page=2` vira um parâmetro extra | `interpolate.ts` | 🟡 | Backlog |

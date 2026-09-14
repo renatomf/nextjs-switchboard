@@ -605,8 +605,8 @@ neles para adicionar um nó.**
 | Datas e durações | `date-fns` `^4.4.0` · `pretty-ms` `^9.3.1` |
 | Nomes de fluxo gerados | `unique-names-generator` `^4.7.1` |
 | Composição de classes e animações | `clsx` · `tailwind-merge` · `class-variance-authority` · `tw-animate-css` |
-| Componentes shadcn | `cmdk` · `vaul` · `input-otp` · `embla-carousel-react` · `react-day-picker` · `recharts` |
-| Tooling | ESLint `^9` + `eslint-config-next` · Prettier `^3.8.3` + plugin Tailwind · `tsx` · `dotenv` |
+| Componentes shadcn | `cmdk` · `vaul` · `input-otp` · `react-day-picker` · `recharts` |
+| Tooling | ESLint `^9` + `eslint-config-next` · Prettier `^3.8.3` + plugin Tailwind · Vitest `^5` · `tsx` · `dotenv` |
 
 ### O que deliberadamente não está aqui
 
@@ -624,6 +624,7 @@ neles para adicionar um nó.**
 | --- | --- |
 | `dev` · `build` · `start` | O ciclo do Next.js |
 | `lint` · `typecheck` · `format` | ESLint · `tsc --noEmit` · Prettier |
+| `test` · `test:watch` | Vitest: uma rodada só, ou refazendo a cada alteração |
 | `db:generate` · `db:migrate` · `db:push` · `db:studio` | Drizzle Kit |
 
 ---

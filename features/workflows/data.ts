@@ -1,6 +1,6 @@
 import { and, desc, eq } from "drizzle-orm"
 
-import { db } from "@/lib/db"
+import { getDb } from "@/lib/db"
 import { workflows, WorkflowGraph } from "@/lib/db/schema"
 import { validateGraph } from "./lib/validate-graph"
 
@@ -15,14 +15,14 @@ export async function saveWorkflowGraph({
 }) {
   const problems = validateGraph(graph)
   if (problems.length > 0) throw new Error(problems.join(" "))
-  await db
+  await getDb()
     .update(workflows)
     .set({ graph, updatedAt: new Date() })
     .where(and(eq(workflows.id, id), eq(workflows.orgId, orgId)))
 }
 
 export function listWorkflows(orgId: string) {
-  return db
+  return getDb()
     .select()
     .from(workflows)
     .where(eq(workflows.orgId, orgId))
@@ -30,7 +30,7 @@ export function listWorkflows(orgId: string) {
 }
 
 export async function getWorkflow(orgId: string, id: string) {
-  const [workflow] = await db
+  const [workflow] = await getDb()
     .select()
     .from(workflows)
     .where(and(eq(workflows.id, id), eq(workflows.orgId, orgId)))
@@ -39,7 +39,7 @@ export async function getWorkflow(orgId: string, id: string) {
 }
 
 export async function createWorkflow(orgId: string, name: string) {
-  const [workflow] = await db
+  const [workflow] = await getDb()
     .insert(workflows)
     .values({ orgId, name })
     .returning()
@@ -48,7 +48,7 @@ export async function createWorkflow(orgId: string, name: string) {
 }
 
 export async function deleteWorkflow(orgId: string, id: string) {
-  const [workflow] = await db
+  const [workflow] = await getDb()
     .delete(workflows)
     .where(and(eq(workflows.id, id), eq(workflows.orgId, orgId)))
     .returning()
