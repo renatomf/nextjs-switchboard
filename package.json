@@ -65,7 +65,7 @@
     "@sentry/esbuild-plugin": "^5.4.0",
     "@tailwindcss/postcss": "^4",
     "@trigger.dev/build": "4.5.16",
-    "@types/node": "^24.13.4",
+    "@types/node": "^26.4.0",
     "@types/pg": "^8.23.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
