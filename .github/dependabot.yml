@@ -41,6 +41,11 @@ updates:
       # does not run on it yet: lint crashes. See docs/roadmap.md.
       - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]
+      # ESLint 10 fails lint: the React, import and a11y plugins that
+      # eslint-config-next brings only support ESLint up to 9. Drop this once
+      # eslint-config-next ships plugins that run on it.
+      - dependency-name: "eslint"
+        update-types: ["version-update:semver-major"]
       # Stagehand 4 changes the API every node executor uses. That is a planned
       # migration (B.5 in docs/roadmap.md), not a dependency bump.
       - dependency-name: "@browserbasehq/stagehand"
