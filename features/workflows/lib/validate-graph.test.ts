@@ -1,22 +1,28 @@
 import type { Edge } from "@xyflow/react"
 import { describe, expect, it } from "vitest"
 
-import type { StepNodeType } from "@/features/workflows/nodes/node-registry"
+import type {
+  NodeType,
+  StepNodeType,
+} from "@/features/workflows/nodes/node-registry"
 import { validateGraph } from "./validate-graph"
 
-// Just enough of a React Flow node for validateGraph, which only reads
-// data.kind. The rest is filler to satisfy the type.
-function node(id: string, kind: "trigger" | "action" = "action"): StepNodeType {
+// Just enough of a React Flow node for validateGraph, which reads data.kind,
+// data.type, data.title and data.values. An action starts out with its
+// required instruction filled, so each test only spells out what it is about.
+function node(
+  id: string,
+  kind: "trigger" | "action" = "action",
+  {
+    type = kind === "trigger" ? "start" : "act",
+    values = kind === "trigger" ? {} : { instruction: "Click the sign in" },
+  }: { type?: NodeType; values?: Record<string, string> } = {}
+): StepNodeType {
   return {
     id,
     type: "step",
     position: { x: 0, y: 0 },
-    data: {
-      type: kind === "trigger" ? "start" : "act",
-      kind,
-      title: id,
-      values: {},
-    },
+    data: { type, kind, title: id, values },
   }
 }
 
@@ -142,6 +148,73 @@ describe("validateGraph", () => {
       expect(problems).toEqual([
         "An edge points to a step that is no longer on the canvas — delete it before running.",
       ])
+    })
+  })
+
+  // An empty required field reaches the executor as undefined, and the run
+  // then fails mid-way with an error from deep inside Stagehand ("Cannot read
+  // properties of undefined (reading 'toolTimeout')", from an Agent with no
+  // instruction) instead of here, in words the user can act on.
+  describe("required fields", () => {
+    it("rejects a step the run executes with a required field left empty", () => {
+      const problems = validateGraph({
+        nodes: [
+          node("start", "trigger"),
+          node("Agent 1", "action", { type: "agent", values: {} }),
+        ],
+        edges: [edge("start", "Agent 1")],
+      })
+
+      expect(problems).toEqual([
+        'Fill in "Instruction" on Agent 1 before running.',
+      ])
+    })
+
+    it("treats a field holding only spaces as empty", () => {
+      const problems = validateGraph({
+        nodes: [
+          node("start", "trigger"),
+          node("Act 1", "action", { values: { instruction: "   " } }),
+        ],
+        edges: [edge("start", "Act 1")],
+      })
+
+      expect(problems).toEqual([
+        'Fill in "Instruction" on Act 1 before running.',
+      ])
+    })
+
+    it("names every empty field of a step", () => {
+      const problems = validateGraph({
+        nodes: [
+          node("start", "trigger"),
+          node("Email", "action", {
+            type: "send-email",
+            values: { to: "delivered@resend.dev" },
+          }),
+        ],
+        edges: [edge("start", "Email")],
+      })
+
+      expect(problems).toEqual([
+        'Fill in "Subject" on Email before running.',
+        'Fill in "Body" on Email before running.',
+      ])
+    })
+
+    // The runner only executes steps touching an edge, so a step left loose on
+    // the canvas is not what a run needs filled in.
+    it("does not check a step the run never executes", () => {
+      const problems = validateGraph({
+        nodes: [
+          node("start", "trigger"),
+          node("a"),
+          node("loose", "action", { type: "agent", values: {} }),
+        ],
+        edges: [edge("start", "a")],
+      })
+
+      expect(problems).toEqual([])
     })
   })
 })
