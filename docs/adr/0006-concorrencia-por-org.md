@@ -53,3 +53,7 @@ Como o Trigger.dev funciona aqui:
 - ⚠️ **No plano Pro, duas runs do mesmo workflow ainda podem executar juntas.** A interface supõe uma
   run por workflow: o Stop enxerga só uma. Garantir isso no servidor fica para a C.2.
 - ⚠️ Os limites são constantes no código. Mudar o limite de um plano exige deploy do worker e do app.
+- ⚠️ **A ordem de deploy importa: primeiro o worker, depois o app.** No teste em desenvolvimento, uma
+  run enviada para `runs-pro` antes de o worker registrar a fila não deu erro: ficou em `queued` sem
+  nunca começar, até ser cancelada. Com o app publicado antes do worker, o Run continuaria
+  respondendo, e as runs ficariam paradas sem aviso.
