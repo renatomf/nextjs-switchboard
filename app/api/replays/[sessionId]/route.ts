@@ -5,6 +5,7 @@ import type { NextRequest } from "next/server"
 
 import { PRO_PLAN } from "@/lib/billing"
 import { getBrowserbase } from "@/lib/browserbase"
+import { getExecutionBySession } from "@/features/workflows/data"
 
 // What Browserbase serves an HLS media playlist as, and what the SDK asks for.
 // hls.js ignores the content type, but Safari's native player — which is what
@@ -23,10 +24,8 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ sessionId: string }> }
 ) {
-  // The gate is org membership, matching the other routes here. Note this
-  // authenticates the caller without tying the session to them: any signed-in
-  // org can replay any session id it knows. See the note in the panel that
-  // eventually calls this.
+  // Signed in with an active org first. Whether the session is that org's is
+  // checked further down, against the run that opened it.
   const { userId, orgId, has } = await auth()
 
   if (!userId || !orgId) {
@@ -60,6 +59,22 @@ export async function GET(
   }
 
   const { sessionId } = await params
+
+  // The session has to belong to one of this org's runs. The id alone proves
+  // nothing: anyone signed in who learned one could otherwise watch another
+  // org's recording. Not this org's and never recorded get the same 404, so
+  // a probe learns nothing, and a 404 rather than the 202 below because
+  // waiting will not change the answer.
+  const execution = await getExecutionBySession(orgId, sessionId)
+
+  if (!execution) {
+    Sentry.logger.warn("Replay refused — session not this org's", {
+      orgId,
+      sessionId,
+    })
+
+    return new Response("Replay not found", { status: 404 })
+  }
 
   try {
     const browserbase = getBrowserbase()

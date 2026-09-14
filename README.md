@@ -123,6 +123,7 @@ sequenceDiagram
     A->>A: auth — exige orgId e confere o plano
     A->>PG: INSERT workflow_versions — versão imutável do grafo
     A->>T: tasks.trigger run-workflow com o versionId, tag workflow id
+    A->>PG: INSERT executions — queued
     A-->>C: devolve o handle da execução
 
     T->>PG: lê exatamente a versão da run
@@ -135,6 +136,7 @@ sequenceDiagram
         T-->>C: metadata.set steps — chega ao vivo
     end
 
+    T->>PG: os hooks avançam a execução — running, succeeded ou failed
     T->>B: stagehand.close — libera a sessão
     T-->>C: steps, outputs e browserbaseSessionId
 
@@ -266,6 +268,10 @@ Buscar a playlist HLS exige a **chave secreta** da Browserbase, então isso não
 navegador. Mas só o manifesto passa pelo proxy: os endereços dos segmentos dentro dele são links de
 CDN já assinados, que o player busca direto.
 
+Antes de qualquer coisa, a rota confere que a sessão pertence a uma run da organização de quem pede,
+pela tabela `executions`. Se não pertencer, responde 404 sem nem consultar a Browserbase: "não é
+seu" e "não existe" dão a mesma resposta ([ADR 0003](docs/adr/0003-registro-de-execucoes.md)).
+
 Essas assinaturas valem cerca de 6 horas, e é justamente por isso que **nada ali pode ser cacheado**
 — um manifesto cacheado é um manifesto cheio de link morto. Pedir de novo é o que gera assinaturas
 novas.
@@ -304,7 +310,7 @@ flowchart TB
 
     Clerk[("🔐 Clerk<br/>login, organizações e planos")]
     Sala[("🟢 Liveblocks<br/>sala = workflowId<br/>cópia viva do fluxo")]
-    Banco[("🐘 Neon Postgres<br/>workflow_versions<br/>uma versão imutável por Run")]
+    Banco[("🐘 Neon Postgres<br/>workflow_versions e executions<br/>versão imutável e registro de cada run")]
 
     subgraph Worker["🔵 Trigger.dev · task run-workflow"]
         Topo["toposort<br/>ordem de dependência"]
@@ -381,15 +387,26 @@ workflows
   org_id      text        not null      -- organização do Clerk
   name        text        not null
   graph       jsonb                     -- { nodes, edges } no formato do React Flow
-  created_at  timestamp   not null
-  updated_at  timestamp   not null
+  created_at  timestamptz not null
+  updated_at  timestamptz not null
 
 workflow_versions                        -- uma por Run, nunca alterada
   id           uuid       pk, default random
   workflow_id  uuid       fk → workflows, on delete cascade
   org_id       text       not null
   graph        jsonb      not null
-  created_at   timestamp  not null
+  created_at   timestamptz not null
+
+executions                               -- uma por run do Trigger.dev
+  id                      uuid         pk, default random
+  run_id                  text         unique: onde o app e o worker se encontram
+  org_id                  text         not null
+  workflow_id             uuid         fk → workflows, on delete cascade
+  version_id              uuid         fk → workflow_versions, on delete cascade
+  status                  text         queued | running | succeeded | failed | cancelled
+  browserbase_session_id  text         unique: é o que liga a gravação à org
+  error                   text
+  created_at, started_at, finished_at  timestamptz
 ```
 
 O `graph` espelha o formato do React Flow **1:1**, então o executor lê o fluxo sem precisar converter
@@ -694,5 +711,9 @@ no cliente, e o `catch` de quem chamou dispararia **no caso de sucesso**. Quem n
   responde `404` até terminar de montá-la — o painel fica perguntando e desiste em 180s.
 - **A cota de replay é de 120 requisições por minuto** por projeto, dividida entre todo mundo. A rota
   repassa o `429` em vez de engolir, para quem estiver chamando diminuir o ritmo.
+- **Uma run que trava sem acionar nenhum hook** (uma falha de sistema, por exemplo) fica como
+  `running` em `executions`. Falta uma reconciliação com a API do Trigger.dev.
+- **Replays de runs anteriores ao registro de execuções respondem 404**: não existe registro de
+  quem é o dono delas.
 - **O Clerk está com chaves de desenvolvimento**, limitadas a ~100 usuários e usando os apps OAuth de
   demonstração da própria Clerk. Produção exige instância de produção e domínio próprio.

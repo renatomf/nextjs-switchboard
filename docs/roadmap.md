@@ -44,9 +44,12 @@ As decisões ficam em [`docs/adr/`](adr/).
 - [x] **B.1** Versões imutáveis de workflow: rascunho no Liveblocks, versão publicada no Postgres.
       Corrige a race condition entre salvar o grafo e a task lê-lo
       ([ADR 0002](adr/0002-versoes-imutaveis-de-workflow.md))
-- [ ] **B.2** Tabelas `executions` e `execution_steps`, atualizadas pelos hooks do Trigger.dev.
-      Corrige o IDOR do replay (hoje não há como ligar um `sessionId` a uma org)
-- [ ] **B.3** Aggregate `Execution` com state machine, em TDD; status `cancelled` no step
+- [x] **B.2** Tabela `executions`, criada pelo app e avançada pelos hooks do Trigger.dev, com as
+      transições protegidas por uma máquina de estados. Fecha o IDOR do replay
+      ([ADR 0003](adr/0003-registro-de-execucoes.md)). A tabela de passos (`execution_steps`) fica
+      para quando alguém precisar lê-los fora do realtime
+- [ ] **B.3** Aggregate `Execution`: a máquina de estados das execuções já existe (B.2); falta levar
+      o mesmo rigor aos passos, com o status `cancelled` no step
 - [ ] **B.4** Engine extraído da task, com ports `BrowserPort` e `ProgressReporter`
 - [ ] **B.5** Migrar para o Stagehand 4: construtor privado, sem `context`, e retornos novos em
       `observe` e `extract`. Vem depois da B.4, porque com o `BrowserPort` a troca fica num adapter só
@@ -57,6 +60,8 @@ As decisões ficam em [`docs/adr/`](adr/).
 - [ ] **C.2** Idempotência no Run e no Send Email (`idempotencyKey` da Resend = `runId:nodeId`)
 - [ ] **C.3** Taxonomia de erros, retry por nó na mesma sessão, `AbortTaskRunError`, timeout por nó
 - [ ] **C.4** Testes de falha (browser fake que falha N vezes) e de dois Runs simultâneos
+- [ ] **C.5** Reconciliar execuções presas em `running` (runs que travaram sem acionar hook) com a
+      API do Trigger.dev, numa task agendada
 
 ## Fase D — Features que puxam arquitetura (escolher 3–4)
 
@@ -93,7 +98,7 @@ bloco `current gaps` do arquivo de teste correspondente.
 | ~~20 arquivos fora do padrão do Prettier, com ruído de CRLF no Windows~~ | vários | ✅ | Resolvido na A.3b |
 | ~~A `0001` tinha sido aplicada com `db:push` e nunca registrada, então o `db:migrate` falhava ao reaplicá-la e desfazia a `0002`~~ | banco | ✅ | Resolvido: baseline da `0001` e A.7 |
 | `.claude/skills` guarda 13 skills como junções do Windows apontando para `.agents/skills`, onde o instalador de skills as mantém. Apagar a `.agents/` quebra essas skills do Claude | `.agents/`, `.claude/` | 🟡 | Saber que existe |
-| As colunas de data são `timestamp` sem fuso, e o driver `pg` as lê no fuso da máquina: no teste de ponta a ponta, uma versão e a run criada 1s depois apareceram com 3h de diferença. Migrar para `timestamptz` | `lib/db/schema.ts` | 🟠 | B.2 (a tabela `executions` é cheia de horários) |
+| ~~As colunas de data eram `timestamp` sem fuso, e o driver `pg` as lia no fuso da máquina (3h de diferença no teste de ponta a ponta)~~ | `lib/db/schema.ts` | ✅ | Resolvido na B.2: `timestamptz`, com conversão explícita em UTC na migration `0004` |
 | O TypeScript 7 faz o typecheck e o build do projeto, mas o ESLint (typescript-eslint) trava com ele. O Dependabot ignora esse major até haver suporte | `package.json` | 🟡 | Backlog |
 | O `@types/node` precisa acompanhar o major do runtime (Node 24). O Dependabot ignora majors dele até o runtime subir | `package.json` | 🟡 | Saber que existe |
 | `npm audit` aponta 64 alertas (1 crítico, 11 altos, 52 moderados), todos em dependências transitivas ou na CLI do Trigger. Nas dependências de produção, que o CI bloqueia, são 6 altos e nenhum crítico | `package-lock.json` | 🟠 | O CI bloqueia só crítico em produção; acompanhar à parte |
