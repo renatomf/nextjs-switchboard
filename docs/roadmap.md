@@ -48,6 +48,8 @@ As decisões ficam em [`docs/adr/`](adr/).
       Corrige o IDOR do replay (hoje não há como ligar um `sessionId` a uma org)
 - [ ] **B.3** Aggregate `Execution` com state machine, em TDD; status `cancelled` no step
 - [ ] **B.4** Engine extraído da task, com ports `BrowserPort` e `ProgressReporter`
+- [ ] **B.5** Migrar para o Stagehand 4: construtor privado, sem `context`, e retornos novos em
+      `observe` e `extract`. Vem depois da B.4, porque com o `BrowserPort` a troca fica num adapter só
 
 ## Fase C — Confiabilidade
 
@@ -91,6 +93,9 @@ bloco `current gaps` do arquivo de teste correspondente.
 | ~~20 arquivos fora do padrão do Prettier, com ruído de CRLF no Windows~~ | vários | ✅ | Resolvido na A.3b |
 | ~~A `0001` tinha sido aplicada com `db:push` e nunca registrada, então o `db:migrate` falhava ao reaplicá-la e desfazia a `0002`~~ | banco | ✅ | Resolvido: baseline da `0001` e A.7 |
 | `.claude/skills` guarda 13 skills como junções do Windows apontando para `.agents/skills`, onde o instalador de skills as mantém. Apagar a `.agents/` quebra essas skills do Claude | `.agents/`, `.claude/` | 🟡 | Saber que existe |
+| As colunas de data são `timestamp` sem fuso, e o driver `pg` as lê no fuso da máquina: no teste de ponta a ponta, uma versão e a run criada 1s depois apareceram com 3h de diferença. Migrar para `timestamptz` | `lib/db/schema.ts` | 🟠 | B.2 (a tabela `executions` é cheia de horários) |
+| O TypeScript 7 faz o typecheck e o build do projeto, mas o ESLint (typescript-eslint) trava com ele. O Dependabot ignora esse major até haver suporte | `package.json` | 🟡 | Backlog |
+| O `@types/node` precisa acompanhar o major do runtime (Node 24). O Dependabot ignora majors dele até o runtime subir | `package.json` | 🟡 | Saber que existe |
 | `npm audit` aponta 64 alertas (1 crítico, 11 altos, 52 moderados), todos em dependências transitivas ou na CLI do Trigger. Nas dependências de produção, que o CI bloqueia, são 6 altos e nenhum crítico | `package-lock.json` | 🟠 | O CI bloqueia só crítico em produção; acompanhar à parte |
 | A CLI do Trigger.dev (4.5.16, e também a 4.6.0) traz o `tar` 6.2.1 vulnerável pela cadeia `c12` 1.x → `giget` 1.x. O `giget` 2 já não usa `tar`, mas o Trigger ainda está preso ao `c12` 1.x. É o mesmo código que o `.mcp.json` já roda via `npx` | `trigger.dev` (devDependency) | 🟠 | Aceito; acompanhar a atualização upstream do `c12` |
 | O CI não reaproveita o cache de build do Next (`.next/cache`) | `ci.yml` | 🟡 | Otimização futura |
