@@ -11,7 +11,7 @@ import { observe } from "./observe"
 import { openUrl } from "./open-url"
 import { sendEmail } from "./send-email"
 
-export type NodeContext = {
+type NodeContext = {
   values: Record<string, string>
   getStagehand: () => Promise<Stagehand>
 }

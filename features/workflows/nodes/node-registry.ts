@@ -22,7 +22,7 @@ export type NodeField = {
   required?: boolean
 }
 
-export type NodeOutput = {
+type NodeOutput = {
   path: string
   label: string
 }

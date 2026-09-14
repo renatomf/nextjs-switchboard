@@ -25,7 +25,7 @@ import { cn } from "@/lib/utils"
 // What a click on a step row identifies. The run id is part of it because the
 // same node appears in every run of the workflow — keying on the node alone
 // would light up its row in all of them at once.
-export type SelectedStep = {
+type SelectedStep = {
   kind: "step"
   runId: string
   nodeId: string
@@ -33,7 +33,7 @@ export type SelectedStep = {
 
 // The replay row. There is one per run rather than one per node, so the run id
 // is the whole of it — that is the difference the `kind` tag is carrying.
-export type SelectedReplay = {
+type SelectedReplay = {
   kind: "replay"
   runId: string
 }

@@ -45,5 +45,3 @@ export function getDb() {
 
   return db
 }
-
-export { schema }
