@@ -1,19 +1,34 @@
 import type { Edge } from "@xyflow/react"
+import { sql } from "drizzle-orm"
 import {
+  check,
   index,
   jsonb,
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core"
 
+// A relative path rather than "@/": unlike the type-only import below, this
+// one survives compilation, so it has to resolve wherever the schema is
+// loaded, drizzle-kit included.
+import {
+  EXECUTION_STATUSES,
+  type ExecutionStatus,
+} from "../../features/workflows/lib/execution-status"
 import type { StepNodeType } from "@/features/workflows/nodes/node-registry"
 
 // Canonical, server-readable snapshot of the flow. Mirrors React Flow's own
 // shape 1:1 so a future executor can read it without remapping. Persisted by the
 // Run action; the live editing copy still lives in the Liveblocks room.
 export type WorkflowGraph = { nodes: StepNodeType[]; edges: Edge[] }
+
+// Every timestamp carries its time zone. A plain `timestamp` has none, and the
+// pg driver reads one in the zone of whichever machine is reading, which
+// shifted times by hours between machines.
+const timestamptz = (name: string) => timestamp(name, { withTimezone: true })
 
 export const workflows = pgTable(
   "workflows",
@@ -22,8 +37,8 @@ export const workflows = pgTable(
     orgId: text("org_id").notNull(),
     name: text("name").notNull(),
     graph: jsonb("graph").$type<WorkflowGraph>(),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+    createdAt: timestamptz("created_at").defaultNow().notNull(),
+    updatedAt: timestamptz("updated_at").defaultNow().notNull(),
   },
   (table) => [
     // The workflow list is always one org's, newest first (listWorkflows).
@@ -50,7 +65,7 @@ export const workflowVersions = pgTable(
     // rest of the data layer, without a join.
     orgId: text("org_id").notNull(),
     graph: jsonb("graph").$type<WorkflowGraph>().notNull(),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
+    createdAt: timestamptz("created_at").defaultNow().notNull(),
   },
   (table) => [
     // Postgres does not index a foreign key on its own. Without this, deleting
@@ -59,6 +74,58 @@ export const workflowVersions = pgTable(
     index("workflow_versions_workflow_id_created_at_idx").on(
       table.workflowId,
       table.createdAt
+    ),
+  ]
+)
+
+// One row per Trigger.dev run: the durable record of what ran, for whom, and
+// how it ended. Trigger.dev keeps runs for a while; this keeps them for good,
+// and it is what ties a run and its browser session to an org.
+export const executions = pgTable(
+  "executions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    // The key the app and the worker meet on. Either may write a run's row
+    // first, so both insert on conflict with it rather than assume the other
+    // already has.
+    runId: text("run_id").notNull().unique(),
+    orgId: text("org_id").notNull(),
+    workflowId: uuid("workflow_id")
+      .notNull()
+      .references(() => workflows.id, { onDelete: "cascade" }),
+    // Null only for a run triggered by an app that predates versions.
+    versionId: uuid("version_id").references(() => workflowVersions.id, {
+      onDelete: "cascade",
+    }),
+    status: text("status").$type<ExecutionStatus>().notNull().default("queued"),
+    // Known once the run opens a browser; many runs never do.
+    browserbaseSessionId: text("browserbase_session_id"),
+    // The message of whatever failed the run.
+    error: text("error"),
+    createdAt: timestamptz("created_at").defaultNow().notNull(),
+    startedAt: timestamptz("started_at"),
+    finishedAt: timestamptz("finished_at"),
+  },
+  (table) => [
+    // The same list the state machine uses, so a status it does not know
+    // cannot reach the table.
+    check(
+      "executions_status_check",
+      sql`${table.status} IN (${sql.raw(EXECUTION_STATUSES.map((s) => `'${s}'`).join(", "))})`
+    ),
+    // A workflow's run history, newest first; also what the cascade from a
+    // deleted workflow uses.
+    index("executions_workflow_id_created_at_idx").on(
+      table.workflowId,
+      table.createdAt
+    ),
+    // The cascade from a deleted version would otherwise scan the table.
+    index("executions_version_id_idx").on(table.versionId),
+    // The replay route finds a run by its browser session. One session
+    // belongs to one run; runs without a session are all null, which a
+    // unique index allows.
+    uniqueIndex("executions_browserbase_session_id_idx").on(
+      table.browserbaseSessionId
     ),
   ]
 )
