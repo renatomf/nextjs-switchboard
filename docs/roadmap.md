@@ -82,7 +82,8 @@ bloco `current gaps` do arquivo de teste correspondente.
 | ~~As páginas de exemplo do Sentry iam para produção e geravam erros falsos para qualquer visitante~~ | `app/sentry-example-page` | ✅ | Resolvido na A.3b |
 | ~~20 arquivos fora do padrão do Prettier, com ruído de CRLF no Windows~~ | vários | ✅ | Resolvido na A.3b |
 | `.claude/skills` guarda 13 skills como junções do Windows apontando para `.agents/skills`, onde o instalador de skills as mantém. Apagar a `.agents/` quebra essas skills do Claude | `.agents/`, `.claude/` | 🟡 | Saber que existe |
-| `npm audit` aponta 59 alertas (8 altos, 51 moderados, nenhum crítico), todos em dependências transitivas | `package-lock.json` | 🟠 | O CI bloqueia só crítico; acompanhar à parte |
+| `npm audit` aponta 64 alertas (1 crítico, 11 altos, 52 moderados), todos em dependências transitivas ou na CLI do Trigger. Nas dependências de produção, que o CI bloqueia, são 6 altos e nenhum crítico | `package-lock.json` | 🟠 | O CI bloqueia só crítico em produção; acompanhar à parte |
+| A CLI do Trigger.dev (4.5.16, e também a 4.6.0) traz o `tar` 6.2.1 vulnerável pela cadeia `c12` 1.x → `giget` 1.x. O `giget` 2 já não usa `tar`, mas o Trigger ainda está preso ao `c12` 1.x. É o mesmo código que o `.mcp.json` já roda via `npx` | `trigger.dev` (devDependency) | 🟠 | Aceito; acompanhar a atualização upstream do `c12` |
 | O CI não reaproveita o cache de build do Next (`.next/cache`) | `ci.yml` | 🟡 | Otimização futura |
 | Depois de apagar uma rota, o `typecheck` local falha até o `next build` ou o `next dev` regenerar `.next/types` (no CI não acontece) | `tsconfig.json` | 🟡 | Saber que existe |
 | Uma aresta apontando para um nó inexistente passa no `validateGraph`, mas a run quebra no `toposort.array` com "Unknown node", antes de publicar qualquer step. Pode acontecer com edição concorrente no canvas | `validate-graph.ts`, `run-workflow.ts:76` | 🟠 | B.1 |
