@@ -45,7 +45,8 @@ updates:
       # migration (B.5 in docs/roadmap.md), not a dependency bump.
       - dependency-name: "@browserbasehq/stagehand"
         update-types: ["version-update:semver-major"]
-    # Groups are matched in order, so the lockstep ones come first.
+    # The lockstep groups come first, and the catch-all at the end excludes
+    # their packages by name: group order alone once let react slip into it.
     groups:
       # These have to move together: the Trigger.dev CLI warns when its version
       # drifts from the SDK's, Next's ESLint config tracks Next, and React and
@@ -61,3 +62,12 @@ updates:
       # own look.
       minor-and-patch:
         update-types: ["minor", "patch"]
+        exclude-patterns:
+          - "trigger.dev"
+          - "@trigger.dev/*"
+          - "next"
+          - "eslint-config-next"
+          - "react"
+          - "react-dom"
+          - "@types/react"
+          - "@types/react-dom"
