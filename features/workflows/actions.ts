@@ -13,10 +13,12 @@ import {
   createWorkflow,
   deleteWorkflow,
   deleteWorkflowSchedule,
+  deleteWorkflowWebhook,
   getWorkflow,
   getWorkflowSchedule,
   publishWorkflowVersion,
   saveWorkflowSchedule,
+  saveWorkflowWebhook,
 } from "@/features/workflows/data"
 import {
   planRequiredMessage,
@@ -33,6 +35,7 @@ import {
   scheduleDeduplicationKey,
 } from "@/features/workflows/lib/schedule-presets"
 import { triggerEnvironmentOf } from "@/features/workflows/lib/trigger-environment"
+import { createWebhookSecret } from "@/features/workflows/lib/webhook-signature"
 import { startWorkflowRun } from "@/features/workflows/start-run"
 import { PRO_PLAN, PlanRequiredError } from "@/lib/billing"
 import { getLiveblocks } from "@/lib/liveblocks"
@@ -534,4 +537,71 @@ export async function deleteWorkflowScheduleAction(workflowId: string) {
     workflowId,
     environment,
   })
+}
+
+type WebhookResult = { ok: true; secret: string } | { ok: false; error: string }
+
+// Gives a workflow a webhook, or replaces the secret of the one it has. Pro
+// only, like a schedule: a webhook lets anything outside start runs, and each
+// one costs a browser session and model calls.
+//
+// The secret goes back to the caller once, here, and into no log: from then
+// on it only ever arrives as a signature to check against.
+export async function createWorkflowWebhookAction(
+  workflowId: string
+): Promise<WebhookResult> {
+  const { orgId, has } = await auth()
+  if (!orgId) throw new Error("No active organization")
+
+  Sentry.getIsolationScope().setAttributes({
+    action: "createWorkflowWebhookAction",
+    orgId,
+    workflowId,
+  })
+
+  if (!has({ plan: PRO_PLAN })) {
+    Sentry.logger.warn("Workflow webhook refused — plan", {
+      orgId,
+      workflowId,
+      requiredPlan: PRO_PLAN,
+    })
+    return {
+      ok: false,
+      error:
+        "Webhook triggers are part of the Pro plan. Upgrade to start this workflow from outside.",
+    }
+  }
+
+  const workflow = await getWorkflow(orgId, workflowId)
+  if (!workflow) throw new Error("Workflow not found")
+
+  // A fresh secret every time, which is what rotating a leaked one has to do:
+  // the caller holding the old secret stops getting in.
+  const secret = createWebhookSecret()
+
+  await saveWorkflowWebhook({ orgId, workflowId, secret })
+
+  Sentry.logger.info("Workflow webhook secret set", { orgId, workflowId })
+
+  return { ok: true, secret }
+}
+
+// Closes a workflow's way in from outside. Open to any plan: an org that left
+// Pro still has to be able to shut it.
+export async function deleteWorkflowWebhookAction(workflowId: string) {
+  const { orgId } = await auth()
+  if (!orgId) throw new Error("No active organization")
+
+  Sentry.getIsolationScope().setAttributes({
+    action: "deleteWorkflowWebhookAction",
+    orgId,
+    workflowId,
+  })
+
+  const workflow = await getWorkflow(orgId, workflowId)
+  if (!workflow) throw new Error("Workflow not found")
+
+  await deleteWorkflowWebhook(orgId, workflowId)
+
+  Sentry.logger.info("Workflow webhook removed", { orgId, workflowId })
 }

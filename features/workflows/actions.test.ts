@@ -4,7 +4,9 @@ import type { WorkflowGraph } from "@/lib/db/schema"
 import {
   cancelWorkflowRunAction,
   createRunsTokenAction,
+  createWorkflowWebhookAction,
   deleteWorkflowScheduleAction,
+  deleteWorkflowWebhookAction,
   getLiveRunIdsAction,
   runWorkflowAction,
   saveWorkflowScheduleAction,
@@ -32,6 +34,8 @@ const {
   createSchedule,
   activateSchedule,
   deleteSchedule,
+  saveWorkflowWebhook,
+  deleteWorkflowWebhook,
 } = vi.hoisted(() => ({
   auth: vi.fn(),
   getWorkflow: vi.fn(),
@@ -51,6 +55,8 @@ const {
   createSchedule: vi.fn(),
   activateSchedule: vi.fn(),
   deleteSchedule: vi.fn(),
+  saveWorkflowWebhook: vi.fn(),
+  deleteWorkflowWebhook: vi.fn(),
 }))
 
 vi.mock("@clerk/nextjs/server", () => ({ auth }))
@@ -75,6 +81,8 @@ vi.mock("@/features/workflows/data", () => ({
   countOrgSchedules,
   saveWorkflowSchedule,
   deleteWorkflowSchedule,
+  saveWorkflowWebhook,
+  deleteWorkflowWebhook,
   createWorkflow: vi.fn(),
   deleteWorkflow: vi.fn(),
 }))
@@ -819,5 +827,102 @@ describe("deleteWorkflowScheduleAction", () => {
       "Internal error"
     )
     expect(deleteWorkflowSchedule).not.toHaveBeenCalled()
+  })
+})
+
+// A webhook lets anything outside start a workflow, so it is the same deal as
+// a schedule: Pro only, and a refusal the user can act on comes back as a
+// result rather than a throw.
+describe("createWorkflowWebhookAction", () => {
+  beforeEach(() => {
+    auth.mockResolvedValue({ orgId: "org_a", has: () => true })
+    getWorkflow.mockResolvedValue({ id: "wf_1", orgId: "org_a" })
+    saveWorkflowWebhook.mockImplementation(async (webhook) => webhook)
+  })
+
+  it("gives the workflow a secret and hands it back", async () => {
+    const result = await createWorkflowWebhookAction("wf_1")
+
+    expect(result).toEqual({
+      ok: true,
+      secret: expect.stringMatching(/^whsec_/),
+    })
+    expect(saveWorkflowWebhook).toHaveBeenCalledWith({
+      orgId: "org_a",
+      workflowId: "wf_1",
+      secret: result.ok ? result.secret : undefined,
+    })
+  })
+
+  // Called again, it replaces the secret: the caller with the old one stops
+  // getting in, which is what rotating a leaked secret has to do.
+  it("gives a different secret every time", async () => {
+    const first = await createWorkflowWebhookAction("wf_1")
+    const second = await createWorkflowWebhookAction("wf_1")
+
+    expect(first.ok && second.ok && first.secret).not.toBe(
+      second.ok ? second.secret : undefined
+    )
+  })
+
+  it("is for the Pro plan only", async () => {
+    auth.mockResolvedValue({ orgId: "org_a", has: () => false })
+
+    await expect(createWorkflowWebhookAction("wf_1")).resolves.toEqual({
+      ok: false,
+      error: expect.stringContaining("Pro plan"),
+    })
+    expect(saveWorkflowWebhook).not.toHaveBeenCalled()
+  })
+
+  it("requires an active organization", async () => {
+    auth.mockResolvedValue({ orgId: null, has: () => true })
+
+    await expect(createWorkflowWebhookAction("wf_1")).rejects.toThrow(
+      "No active organization"
+    )
+    expect(saveWorkflowWebhook).not.toHaveBeenCalled()
+  })
+
+  it("refuses another org's workflow", async () => {
+    getWorkflow.mockResolvedValue(undefined)
+
+    await expect(createWorkflowWebhookAction("wf_other")).rejects.toThrow(
+      "Workflow not found"
+    )
+    expect(saveWorkflowWebhook).not.toHaveBeenCalled()
+  })
+})
+
+describe("deleteWorkflowWebhookAction", () => {
+  beforeEach(() => {
+    auth.mockResolvedValue({ orgId: "org_a", has: () => true })
+    getWorkflow.mockResolvedValue({ id: "wf_1", orgId: "org_a" })
+    deleteWorkflowWebhook.mockResolvedValue(undefined)
+  })
+
+  it("takes the webhook away", async () => {
+    await deleteWorkflowWebhookAction("wf_1")
+
+    expect(deleteWorkflowWebhook).toHaveBeenCalledWith("org_a", "wf_1")
+  })
+
+  // Turning off a way in must not depend on the plan: an org that left Pro
+  // still has to be able to close it.
+  it("works for an org no longer on Pro", async () => {
+    auth.mockResolvedValue({ orgId: "org_a", has: () => false })
+
+    await deleteWorkflowWebhookAction("wf_1")
+
+    expect(deleteWorkflowWebhook).toHaveBeenCalledWith("org_a", "wf_1")
+  })
+
+  it("refuses another org's workflow", async () => {
+    getWorkflow.mockResolvedValue(undefined)
+
+    await expect(deleteWorkflowWebhookAction("wf_other")).rejects.toThrow(
+      "Workflow not found"
+    )
+    expect(deleteWorkflowWebhook).not.toHaveBeenCalled()
   })
 })

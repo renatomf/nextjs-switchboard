@@ -176,3 +176,31 @@ export const workflowSchedules = pgTable(
 )
 
 export type WorkflowSchedule = typeof workflowSchedules.$inferSelect
+
+// How a workflow is started from outside: a secret the caller signs its
+// request with. One per workflow, and not split by environment like a
+// schedule — what separates development from production here is the host the
+// caller sends the request to, not the record.
+export const workflowWebhooks = pgTable(
+  "workflow_webhooks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workflowId: uuid("workflow_id")
+      .notNull()
+      .references(() => workflows.id, { onDelete: "cascade" }),
+    orgId: text("org_id").notNull(),
+    // Kept as it is, because checking a signature needs the secret back. The
+    // credentials vault is the step that encrypts columns like this one.
+    secret: text("secret").notNull(),
+    // When a signed request last started a run, for the panel to show.
+    lastUsedAt: timestamptz("last_used_at"),
+    createdAt: timestamptz("created_at").defaultNow().notNull(),
+    updatedAt: timestamptz("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    // One webhook per workflow, and the lookup the route does on every call.
+    uniqueIndex("workflow_webhooks_workflow_id_idx").on(table.workflowId),
+  ]
+)
+
+export type WorkflowWebhook = typeof workflowWebhooks.$inferSelect

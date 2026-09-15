@@ -43,6 +43,13 @@
       "when": 1789511214852,
       "tag": "0005_simple_whistler",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1789515754536,
+      "tag": "0006_long_ulik",
+      "breakpoints": true
     }
   ]
 }
