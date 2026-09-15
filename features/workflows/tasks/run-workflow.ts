@@ -10,6 +10,7 @@ import {
   runSteps,
   type ProgressReporter,
 } from "@/features/workflows/engine/run-steps"
+import { resolveModel } from "@/features/workflows/lib/model-config"
 import { RUN_QUEUES } from "@/features/workflows/lib/run-queues"
 import { nodeExecutors } from "@/features/workflows/nodes/node-executors"
 import { createBrowserSession } from "@/features/workflows/tasks/browser-session"
@@ -114,26 +115,20 @@ export const runWorkflowTask = task({
       const apiKey = process.env.BROWSERBASE_API_KEY
       if (!apiKey) throw new Error("BROWSERBASE_API_KEY is not set")
 
-      // Overridable so a model can be swapped without a code change: model
-      // availability moves fast, and a retired or overloaded one is a config
-      // problem, not a code one. Prefer one of the models Stagehand's agent
-      // types list: that list is what this default was picked from.
-      const modelName =
-        process.env.STAGEHAND_MODEL ?? "anthropic/claude-opus-4-8"
-      // The model's own key, handed straight to whoever serves it, so it has to
-      // match the provider in modelName: an override through STAGEHAND_MODEL
-      // only works while it stays on anthropic/. Without a key the agent fails
-      // with "API key not valid", which is what a keyless
-      // google/gemini-3.5-flash did from 2026-09-08 until this was restored.
-      const modelApiKey = process.env.CLAUDE_API_KEY
+      // The model and its key, from STAGEHAND_MODEL: see resolveModel. Resolved
+      // before the session opens, so a missing key fails the run here, by
+      // name, instead of mid-run as "API key not valid".
+      const { model, disableAPI } = resolveModel(process.env)
 
       const stagehand = new Stagehand({
-        // Runs the session on Browserbase rather than a local Chrome, and routes
-        // act/extract/observe through their API — which is also what makes the
-        // run show up under the session's Stagehand tab in the dashboard.
+        // Runs the session on Browserbase rather than a local Chrome. The AI
+        // steps go through Browserbase's hosted Stagehand API as well, which is
+        // also what shows the run under the session's Stagehand tab, except
+        // with a local model, whose inference has to stay in this worker.
         env: "BROWSERBASE",
         apiKey,
-        model: modelApiKey ? { modelName, apiKey: modelApiKey } : modelName,
+        model,
+        disableAPI,
         // Pino's logging backend spawns a thread-stream worker (lib/worker.js)
         // that can't be resolved inside trigger.dev's bundled output. Disable it —
         // the option exists for exactly these minimal/bundled environments.
