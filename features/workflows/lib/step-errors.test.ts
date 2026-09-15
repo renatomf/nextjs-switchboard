@@ -36,16 +36,18 @@ describe("isRetryableStepError", () => {
 
     it("a stream from Stagehand's API that ended part-way", () => {
       expect(
-        isRetryableStepError(new Error("Stream ended without completion signal"))
+        isRetryableStepError(
+          new Error("Stream ended without completion signal")
+        )
       ).toBe(true)
     })
 
     it.each(["ECONNRESET", "ETIMEDOUT", "ECONNREFUSED", "EAI_AGAIN"])(
       "a connection that failed with %s",
       (code) => {
-        expect(isRetryableStepError(withFields("connect failed", { code }))).toBe(
-          true
-        )
+        expect(
+          isRetryableStepError(withFields("connect failed", { code }))
+        ).toBe(true)
       }
     )
 
