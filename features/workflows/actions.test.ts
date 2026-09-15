@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { WorkflowGraph } from "@/lib/db/schema"
-import { cancelWorkflowRunAction, runWorkflowAction } from "./actions"
+import {
+  cancelWorkflowRunAction,
+  createRunsTokenAction,
+  getLiveRunIdsAction,
+  runWorkflowAction,
+} from "./actions"
 
 // The actions sit between three outside systems: Clerk says who is asking,
 // Postgres whose workflow it is, Trigger.dev whose run it is. Each is faked at
@@ -17,6 +22,7 @@ const {
   triggerTask,
   withWorkflowRunLock,
   getLatestUnsettledExecution,
+  createPublicToken,
 } = vi.hoisted(() => ({
   auth: vi.fn(),
   getWorkflow: vi.fn(),
@@ -28,10 +34,12 @@ const {
   triggerTask: vi.fn(),
   withWorkflowRunLock: vi.fn(),
   getLatestUnsettledExecution: vi.fn(),
+  createPublicToken: vi.fn(),
 }))
 
 vi.mock("@clerk/nextjs/server", () => ({ auth }))
 vi.mock("@trigger.dev/sdk", () => ({
+  auth: { createPublicToken },
   runs: { retrieve: retrieveRun, cancel: cancelRun },
   tasks: { trigger: triggerTask },
 }))
@@ -51,6 +59,8 @@ vi.mock("@sentry/nextjs", () => ({
   captureException: vi.fn(),
 }))
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }))
+// Throws outside a React Server Components build, which a test is not.
+vi.mock("server-only", () => ({}))
 vi.mock("next/navigation", () => ({ redirect: vi.fn() }))
 
 describe("runWorkflowAction", () => {
@@ -331,5 +341,128 @@ describe("cancelWorkflowRunAction", () => {
       expect(cancelRun).not.toHaveBeenCalled()
       expect(advanceExecution).not.toHaveBeenCalled()
     })
+  })
+})
+
+// The canvas asks this while it shows a run as going: a realtime subscription
+// can go silent without an error, and the server's answer is how the canvas
+// finds out it has been left behind.
+describe("getLiveRunIdsAction", () => {
+  const ofWorkflow = (id: string, status: string, workflowId = "wf_1") => ({
+    id,
+    status,
+    taskIdentifier: "run-workflow",
+    tags: [`workflow:${workflowId}`],
+  })
+
+  // Org A owns wf_1, whose run_1 is executing.
+  beforeEach(() => {
+    auth.mockResolvedValue({ orgId: "org_a" })
+    getWorkflow.mockResolvedValue({ id: "wf_1", orgId: "org_a" })
+    retrieveRun.mockImplementation(async (id: string) =>
+      ofWorkflow(id, "EXECUTING")
+    )
+  })
+
+  it("answers with the runs still going", async () => {
+    await expect(
+      getLiveRunIdsAction({ workflowId: "wf_1", runIds: ["run_1"] })
+    ).resolves.toEqual(["run_1"])
+    expect(getWorkflow).toHaveBeenCalledWith("org_a", "wf_1")
+    expect(retrieveRun).toHaveBeenCalledWith("run_1")
+  })
+
+  it("leaves out a run that has ended", async () => {
+    retrieveRun.mockImplementation(async (id: string) =>
+      ofWorkflow(id, id === "run_1" ? "COMPLETED" : "QUEUED")
+    )
+
+    await expect(
+      getLiveRunIdsAction({ workflowId: "wf_1", runIds: ["run_1", "run_2"] })
+    ).resolves.toEqual(["run_2"])
+  })
+
+  // A run Trigger.dev cannot be asked about right now is not known to have
+  // ended, and calling it ended would have the canvas resubscribe for nothing.
+  it("counts a run it cannot look up right now as still going", async () => {
+    retrieveRun.mockRejectedValue(new Error("fetch failed"))
+
+    await expect(
+      getLiveRunIdsAction({ workflowId: "wf_1", runIds: ["run_1"] })
+    ).resolves.toEqual(["run_1"])
+  })
+
+  // The canvas shows at most one run going, so a long list is not the canvas
+  // asking, and each id costs a request to Trigger.dev.
+  it("looks up no more than a handful of runs per call", async () => {
+    const runIds = Array.from({ length: 20 }, (_, index) => `run_${index}`)
+
+    await getLiveRunIdsAction({ workflowId: "wf_1", runIds })
+
+    expect(retrieveRun).toHaveBeenCalledTimes(5)
+  })
+
+  it("requires an active organization", async () => {
+    auth.mockResolvedValue({ orgId: null })
+
+    await expect(
+      getLiveRunIdsAction({ workflowId: "wf_1", runIds: ["run_1"] })
+    ).rejects.toThrow("No active organization")
+    expect(retrieveRun).not.toHaveBeenCalled()
+  })
+
+  // Every org's runs live in one Trigger.dev project, so the answer must not
+  // tell anyone how another org's runs are doing.
+  it("refuses another org's workflow without looking up its runs", async () => {
+    getWorkflow.mockResolvedValue(undefined)
+
+    await expect(
+      getLiveRunIdsAction({ workflowId: "wf_other", runIds: ["run_9"] })
+    ).rejects.toThrow("Workflow not found")
+    expect(retrieveRun).not.toHaveBeenCalled()
+  })
+
+  it("does not report a run of another workflow as going", async () => {
+    retrieveRun.mockResolvedValue(ofWorkflow("run_9", "EXECUTING", "wf_other"))
+
+    await expect(
+      getLiveRunIdsAction({ workflowId: "wf_1", runIds: ["run_9"] })
+    ).resolves.toEqual([])
+  })
+})
+
+// The realtime subscription calls this when Trigger.dev turns its token down,
+// so a canvas left open past the token's hour keeps getting updates.
+describe("createRunsTokenAction", () => {
+  beforeEach(() => {
+    auth.mockResolvedValue({ orgId: "org_a" })
+    getWorkflow.mockResolvedValue({ id: "wf_1", orgId: "org_a" })
+    createPublicToken.mockResolvedValue("token_1")
+  })
+
+  it("mints a read-only token for the workflow's runs and nothing else", async () => {
+    await expect(createRunsTokenAction("wf_1")).resolves.toBe("token_1")
+    expect(createPublicToken).toHaveBeenCalledWith({
+      scopes: { read: { tags: ["workflow:wf_1"] } },
+      expirationTime: "1hr",
+    })
+  })
+
+  it("requires an active organization", async () => {
+    auth.mockResolvedValue({ orgId: null })
+
+    await expect(createRunsTokenAction("wf_1")).rejects.toThrow(
+      "No active organization"
+    )
+    expect(createPublicToken).not.toHaveBeenCalled()
+  })
+
+  it("mints no token for another org's workflow", async () => {
+    getWorkflow.mockResolvedValue(undefined)
+
+    await expect(createRunsTokenAction("wf_other")).rejects.toThrow(
+      "Workflow not found"
+    )
+    expect(createPublicToken).not.toHaveBeenCalled()
   })
 })

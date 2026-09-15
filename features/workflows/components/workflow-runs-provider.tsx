@@ -2,9 +2,11 @@
 
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
+  useState,
   type ReactNode,
 } from "react"
 import * as Sentry from "@sentry/nextjs"
@@ -12,14 +14,25 @@ import { useRealtimeRunsWithTag } from "@trigger.dev/react-hooks"
 
 import type { RunStep } from "@/features/workflows/engine/run-steps"
 import type { runWorkflowTask } from "@/features/workflows/tasks/run-workflow"
+import {
+  createRunsTokenAction,
+  getLiveRunIdsAction,
+} from "@/features/workflows/actions"
+import { isRealtimeViewStale } from "@/features/workflows/lib/run-liveness"
 import { workflowRunTag } from "@/features/workflows/lib/run-ownership"
-import { toWorkflowRun } from "@/features/workflows/lib/to-workflow-run"
+import {
+  isRunLive,
+  toWorkflowRun,
+} from "@/features/workflows/lib/to-workflow-run"
 
 type WorkflowRuns = ReturnType<
   typeof useRealtimeRunsWithTag<typeof runWorkflowTask>
 >
 
 type WorkflowRunsValue = Pick<WorkflowRuns, "runs" | "error">
+
+// How often the canvas checks with the server while it shows a run as going.
+const WATCHDOG_INTERVAL_MS = 10_000
 
 // One subscription for the whole canvas. Every component that wants run state
 // reads it from here instead of opening a socket of its own.
@@ -28,7 +41,7 @@ const WorkflowRunsContext = createContext<WorkflowRunsValue | null>(null)
 interface WorkflowRunsProviderProps {
   workflowId: string
   // A Trigger.dev public access token scoped to read this workflow's tag, minted
-  // on the server: auth.createPublicToken({ scopes: { read: { tags: [...] } } }).
+  // on the server by createRunsReadToken.
   publicAccessToken: string
   children: ReactNode
 }
@@ -38,42 +51,161 @@ export function WorkflowRunsProvider({
   publicAccessToken,
   children,
 }: WorkflowRunsProviderProps) {
-  // Runs are tagged workflow:<id> when the Run button triggers them, so the tag
-  // is the handle on "every run of this workflow" without tracking run ids.
+  // The realtime hooks keep their state in a cache shared by id, so it outlives
+  // any one subscription: a fresh one starts from the runs the canvas already
+  // shows instead of from none.
+  const subscriptionId = `workflow-runs:${workflowId}`
+
+  // Reads that shared state without subscribing. Subscribing is
+  // <RunsSubscription>'s job, so it can be started over without this, or the
+  // canvas below it, remounting.
   const { runs, error } = useRealtimeRunsWithTag<typeof runWorkflowTask>(
     workflowRunTag(workflowId),
-    {
-      accessToken: publicAccessToken,
-      // The payload is just the ids we already have on the client — no reason to
-      // pull it over the wire on every update. output and metadata are the point.
-      skipColumns: ["payload"],
-    }
+    { id: subscriptionId, enabled: false }
   )
+
+  // Bumped to start the subscription over, by remounting it.
+  const [generation, setGeneration] = useState(0)
+
+  // The error the subscription had when it was last started over. The shared
+  // state keeps an error after its subscription is gone, and a fresh one never
+  // clears it, so one from before the restart is set aside instead of shown.
+  const [clearedError, setClearedError] = useState<Error>()
+  const currentError = error === clearedError ? undefined : error
+
+  const resubscribe = useCallback(() => {
+    setClearedError(error)
+    setGeneration((current) => current + 1)
+  }, [error])
 
   // The panels render this error as "Lost connection to the runs", which tells
   // the user but nobody else. A dropped subscription means the canvas stops
   // showing live progress, so it is worth seeing — an expired public token or a
   // socket that will not reconnect both land here.
   useEffect(() => {
-    if (!error) return
+    if (!currentError) return
 
     Sentry.logger.error("Realtime run subscription dropped", {
       workflowId,
-      reason: error.message,
+      reason: currentError.message,
     })
-    Sentry.captureException(error, {
+    Sentry.captureException(currentError, {
       tags: { area: "trigger-realtime" },
       extra: { workflowId },
     })
-  }, [error, workflowId])
+  }, [currentError, workflowId])
 
-  const value = useMemo(() => ({ runs, error }), [runs, error])
+  // A string, so the watchdog below restarts when the runs shown as going
+  // change, not on every update to their progress.
+  const liveRunKey = useMemo(
+    () =>
+      runs
+        .filter(isRunLive)
+        .map((run) => run.id)
+        .join(","),
+    [runs]
+  )
+
+  // The watchdog. A subscription can go silent without an error: the canvas
+  // then keeps a run as going long after it ended, with a spinner on a step
+  // that finished and a Stop button for a run that is gone. While a run shows
+  // as going, the server is asked whether it still is, and a canvas left
+  // behind gets a fresh subscription, which comes back with every run as it
+  // is now.
+  useEffect(() => {
+    if (!liveRunKey) return
+
+    const shown = liveRunKey.split(",")
+    // Set once this effect is done with: the realtime view moved on while the
+    // server was being asked, so the answer is about a view no longer shown.
+    let superseded = false
+
+    async function check() {
+      // A hidden tab has no one to show a run to; it checks on its way back.
+      if (document.visibilityState !== "visible") return
+
+      let stillLive: string[]
+      try {
+        stillLive = await getLiveRunIdsAction({ workflowId, runIds: shown })
+      } catch {
+        // Nothing to act on: the next check asks again.
+        return
+      }
+
+      if (superseded || !isRealtimeViewStale(shown, stillLive)) return
+
+      // Worth counting: how often a subscription goes silent is what says
+      // whether this is a safety net or the thing holding the canvas up.
+      Sentry.logger.warn("Realtime run view went stale — resubscribing", {
+        workflowId,
+        runIds: shown.join(", "),
+      })
+      resubscribe()
+    }
+
+    const interval = setInterval(check, WATCHDOG_INTERVAL_MS)
+
+    function onVisibilityChange() {
+      if (document.visibilityState === "visible") void check()
+    }
+    document.addEventListener("visibilitychange", onVisibilityChange)
+
+    return () => {
+      superseded = true
+      clearInterval(interval)
+      document.removeEventListener("visibilitychange", onVisibilityChange)
+    }
+  }, [liveRunKey, workflowId, resubscribe])
+
+  const value = useMemo(
+    () => ({ runs, error: currentError }),
+    [runs, currentError]
+  )
 
   return (
     <WorkflowRunsContext.Provider value={value}>
+      <RunsSubscription
+        key={generation}
+        subscriptionId={subscriptionId}
+        workflowId={workflowId}
+        publicAccessToken={publicAccessToken}
+      />
       {children}
     </WorkflowRunsContext.Provider>
   )
+}
+
+// The subscription behind the canvas's run state. It renders nothing: what it
+// receives lands in the state shared under subscriptionId, where the provider
+// reads it. Remounting it is how the provider starts it over.
+function RunsSubscription({
+  subscriptionId,
+  workflowId,
+  publicAccessToken,
+}: {
+  subscriptionId: string
+  workflowId: string
+  publicAccessToken: string
+}) {
+  // Called when Trigger.dev turns the token down, which it does once the
+  // token's hour is up. The subscription reconnects with the new one.
+  const refreshAccessToken = useCallback(
+    () => createRunsTokenAction(workflowId),
+    [workflowId]
+  )
+
+  // Runs are tagged workflow:<id> when the Run button triggers them, so the tag
+  // is the handle on "every run of this workflow" without tracking run ids.
+  useRealtimeRunsWithTag<typeof runWorkflowTask>(workflowRunTag(workflowId), {
+    id: subscriptionId,
+    accessToken: publicAccessToken,
+    refreshAccessToken,
+    // The payload is just the ids we already have on the client — no reason to
+    // pull it over the wire on every update. output and metadata are the point.
+    skipColumns: ["payload"],
+  })
+
+  return null
 }
 
 function useWorkflowRuns() {

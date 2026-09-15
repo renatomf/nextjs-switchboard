@@ -1,7 +1,6 @@
 import { notFound } from "next/navigation"
 import * as Sentry from "@sentry/nextjs"
 import { auth } from "@clerk/nextjs/server"
-import { auth as triggerAuth } from "@trigger.dev/sdk"
 import { ReactFlowProvider } from "@xyflow/react"
 
 import { PRO_PLAN, PlanRequiredError } from "@/lib/billing"
@@ -11,7 +10,7 @@ import {
   planRequiredMessage,
   premiumNodeLabelsOnCanvas,
 } from "@/features/workflows/lib/premium-gate"
-import { workflowRunTag } from "@/features/workflows/lib/run-ownership"
+import { createRunsReadToken } from "@/features/workflows/lib/runs-token"
 import { PlanRequired } from "@/features/workflows/components/plan-required"
 import { Room } from "@/features/workflows/components/room"
 import { WorkflowRunsProvider } from "@/features/workflows/components/workflow-runs-provider"
@@ -97,13 +96,7 @@ export default async function Page({
     },
   })
 
-  // Read-only and scoped to this one workflow's tag, so the token that reaches
-  // the browser can subscribe to this workflow's runs and nothing else. The
-  // default expiry is 15 minutes, which is short for a canvas left open.
-  const publicAccessToken = await triggerAuth.createPublicToken({
-    scopes: { read: { tags: [workflowRunTag(id)] } },
-    expirationTime: "1hr",
-  })
+  const publicAccessToken = await createRunsReadToken(id)
 
   // The palette lives in the sidebar, outside <ReactFlow>, so the provider has
   // to sit above both of them for the two to share a single React Flow store.
