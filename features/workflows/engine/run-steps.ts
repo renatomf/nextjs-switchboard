@@ -3,6 +3,10 @@ import type { Stagehand } from "@browserbasehq/stagehand"
 
 import { interpolate } from "@/features/workflows/lib/interpolate"
 import {
+  isRetryableStepError,
+  StepTimeoutError,
+} from "@/features/workflows/lib/step-errors"
+import {
   nextStepStatus,
   type StepEvent,
   type StepStatus,
@@ -25,13 +29,31 @@ export type RunStep = {
   // completed all the way through — and it is never "pending" in between, which
   // is what keeps a failed run's repair from painting the entry point red.
   status: StepStatus
-  // How long the executor took, in milliseconds. Set once the step settles, so
-  // a failed step reports its time too.
+  // How long the step took, in milliseconds, across all its attempts. Set once
+  // the step settles, so a failed step reports its time too.
   durationMs?: number
   // What the executor returned, clamped by clampOutput.
   output?: unknown
   // The message of whatever the executor threw, on a failed step only.
   error?: string
+  // The attempt the step is on, or ended on. Only set once a step has needed
+  // more than one, so a step that worked first time carries nothing extra.
+  attempts?: number
+}
+
+// How a node's steps are run: how long one attempt may take, how many
+// attempts a step gets, and how long to wait before the next one.
+export type StepPolicy = {
+  timeoutMs: number
+  maxAttempts: number
+  retryDelayMs: number
+}
+
+// For a node with no policy of its own: one attempt, a minute.
+const DEFAULT_STEP_POLICY: StepPolicy = {
+  timeoutMs: 60_000,
+  maxAttempts: 1,
+  retryDelayMs: 0,
 }
 
 // The run's browser as the walk sees it: a step asks for it, and the run lets
@@ -80,20 +102,64 @@ const clampOutput = (output: unknown) => {
     : `${json.slice(0, OUTPUT_CHAR_CAP)}… (truncated)`
 }
 
+// A non-Error throw is rare but real (a rejected string, an object from a
+// native binding), and it is exactly the case where losing the message leaves
+// the console with nothing to show.
+const messageOf = (error: unknown) =>
+  error instanceof Error ? error.message : String(error)
+
+// The attempt's result, or a StepTimeoutError once its time is up. The attempt
+// itself is not stopped, since an executor has no way to be: it is left to
+// finish or fail on its own, and the browser it drives is closed once the
+// step's failure ends the run.
+function withinTime<T>(attempt: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+
+  const timeUp = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new StepTimeoutError(timeoutMs)), timeoutMs)
+  })
+
+  return Promise.race([attempt, timeUp]).finally(() => clearTimeout(timer))
+}
+
+// Waits before the next attempt, and gives up on it the moment the run is
+// stopped: a Stop must not wait out a delay, or start the attempt behind it.
+function pause(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) return reject(signal.reason)
+
+    const onAbort = () => {
+      clearTimeout(timer)
+      reject(signal.reason)
+    }
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort)
+      resolve()
+    }, ms)
+
+    signal.addEventListener("abort", onAbort, { once: true })
+  })
+}
+
 // Walks a workflow graph: works out the order the steps run in, and runs each
 // one with the executor registered for its node type, reporting every change
 // as it goes. Knows nothing of Trigger.dev or Browserbase: the task hands it a
 // browser, a reporter and a logger, which is what makes the walk testable.
 export async function runSteps({
+  runId,
   graph: { nodes, edges },
   executors,
+  policies,
   browser,
   progress,
   logger,
   signal,
 }: {
+  // Makes each step's idempotency key unique to this run.
+  runId: string
   graph: WorkflowGraph
   executors: Partial<Record<NodeType, NodeExecutor>>
+  policies: Partial<Record<NodeType, StepPolicy>>
   browser: BrowserPort
   progress: ProgressReporter
   logger: RunLogger
@@ -200,13 +266,52 @@ export async function runSteps({
         ])
       )
 
-      // Timed around the executor alone, so a step's duration is the work it
+      const policy = policies[node.data.type] ?? DEFAULT_STEP_POLICY
+      // The same for every attempt, so a service that has already done what
+      // an attempt asked (an email sent, its answer lost) can tell the next
+      // attempt is the same request.
+      const idempotencyKey = `${runId}:${id}`
+
+      // Timed around the attempts alone, so a step's duration is the work it
       // did and not the interpolation or bookkeeping around it. Read on both
       // paths below, which is why it sits outside the try.
       const startedAt = Date.now()
 
       try {
-        outputs[id] = await executor({ values, getStagehand: browser.get })
+        // Each attempt runs in the run's one browser, on the page the steps
+        // before it left: a step is tried again where it stands, instead of
+        // the whole run starting over in a new session. Only failures worth
+        // it get another attempt (isRetryableStepError), and never once the
+        // run has been stopped.
+        for (let attempt = 1; ; attempt++) {
+          try {
+            outputs[id] = await withinTime(
+              executor({ values, getStagehand: browser.get, idempotencyKey }),
+              policy.timeoutMs
+            )
+            break
+          } catch (error) {
+            const tryAgain =
+              attempt < policy.maxAttempts &&
+              !signal.aborted &&
+              isRetryableStepError(error)
+
+            if (!tryAgain) throw error
+
+            logger.warn(`Step failed, trying again: ${node.data.title}`, {
+              nodeId: id,
+              attempt,
+              error: messageOf(error),
+            })
+
+            await pause(policy.retryDelayMs, signal)
+
+            // Still running, now on its next attempt, which the canvas shows.
+            updateStep(id, "retried", { attempts: attempt + 1 })
+            await progress.flush()
+          }
+        }
+
         // Logged per node, not just returned at the end. A run that throws
         // returns no output at all, so without this every result the run did
         // produce before it broke is lost. It also lands each result on the
@@ -229,13 +334,7 @@ export async function runSteps({
         } else {
           updateStep(id, "failed", {
             durationMs,
-            // A non-Error throw is rare but real (a rejected string, an
-            // object from a native binding), and it is exactly the case where
-            // losing the message leaves the console with nothing to show.
-            error: (error instanceof Error
-              ? error.message
-              : String(error)
-            ).slice(0, ERROR_CHAR_CAP),
+            error: messageOf(error).slice(0, ERROR_CHAR_CAP),
           })
         }
         // A thrown run returns no output, so this is the only way the step's
@@ -250,7 +349,8 @@ export async function runSteps({
       })
     }
   } finally {
-    // A no-op when a cancel got there first.
+    // A no-op when a cancel got there first. After a step that ran out of
+    // time, this is also what stops the attempt still driving the browser.
     await browser.release()
   }
 

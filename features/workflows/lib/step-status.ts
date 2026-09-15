@@ -16,6 +16,7 @@ export type StepStatus = (typeof STEP_STATUSES)[number]
 
 export const STEP_EVENTS = [
   "started",
+  "retried",
   "succeeded",
   "failed",
   "cancelled",
@@ -27,6 +28,9 @@ export type StepEvent = (typeof STEP_EVENTS)[number]
 // Each event, the one status it moves a step out of, and where it lands.
 const TRANSITIONS: Record<StepEvent, { from: StepStatus; to: StepStatus }> = {
   started: { from: "pending", to: "running" },
+  // A failed attempt that earns another: the step keeps running, on to its
+  // next attempt.
+  retried: { from: "running", to: "running" },
   succeeded: { from: "running", to: "done" },
   failed: { from: "running", to: "failed" },
   cancelled: { from: "running", to: "cancelled" },

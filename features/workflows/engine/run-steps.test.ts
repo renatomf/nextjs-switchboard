@@ -7,8 +7,9 @@ import type {
   NodeType,
   StepNodeType,
 } from "@/features/workflows/nodes/node-registry"
+import { StepTimeoutError } from "@/features/workflows/lib/step-errors"
 import type { WorkflowGraph } from "@/lib/db/schema"
-import { runSteps, type RunStep } from "./run-steps"
+import { runSteps, type RunStep, type StepPolicy } from "./run-steps"
 
 function node(
   id: string,
@@ -42,16 +43,30 @@ const chain: WorkflowGraph = {
   edges: [edge("start", "a"), edge("a", "b")],
 }
 
+// What an act gets unless a test says otherwise: one attempt, and time enough
+// that no test runs out of it by accident.
+const oneAttempt: StepPolicy = {
+  timeoutMs: 1_000,
+  maxAttempts: 1,
+  retryDelayMs: 0,
+}
+
+// An error of the kind worth trying again: a connection that dropped.
+const connectionReset = () =>
+  Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" })
+
 // A run wired to fakes: the executor for acts, a browser that records whether
 // it was opened and released, and a reporter that keeps every publish so a
 // test can read what the run showed at each point.
 function setup({
   graph = chain,
   act,
+  policy = oneAttempt,
   signal = new AbortController().signal,
 }: {
   graph?: WorkflowGraph
   act: NodeExecutor
+  policy?: StepPolicy
   signal?: AbortSignal
 }) {
   const published: RunStep[][] = []
@@ -70,8 +85,10 @@ function setup({
 
   const run = () =>
     runSteps({
+      runId: "run_1",
       graph,
       executors: { act },
+      policies: { act: policy },
       browser,
       progress,
       logger,
@@ -263,6 +280,146 @@ describe("runSteps", () => {
       await expect(run()).rejects.toBe("quota exceeded")
 
       expect(lastPublished(published)[1].error).toBe("quota exceeded")
+    })
+  })
+
+  // A step that fails for a reason worth trying again gets another go in the
+  // same browser, on the page the steps before it left, instead of the whole
+  // run starting over in a new session.
+  describe("trying a step again", () => {
+    const retrying: StepPolicy = {
+      timeoutMs: 1_000,
+      maxAttempts: 3,
+      retryDelayMs: 0,
+    }
+
+    it("tries again after an error worth it, in the same browser", async () => {
+      let calls = 0
+      const { run, browser } = setup({
+        policy: retrying,
+        act: async ({ values, getStagehand }) => {
+          await getStagehand()
+          if (values.instruction === "a" && ++calls === 1) {
+            throw connectionReset()
+          }
+          return "ok"
+        },
+      })
+
+      const { steps } = await run()
+
+      expect(calls).toBe(2)
+      expect(statuses(steps)).toEqual(["start:done", "a:done", "b:done"])
+      expect(steps[1].attempts).toBe(2)
+      expect(browser.release).toHaveBeenCalledTimes(1)
+    })
+
+    it("stays running while it tries again, and says which attempt it is on", async () => {
+      let seen: RunStep | undefined
+      let calls = 0
+      const { run, published } = setup({
+        policy: retrying,
+        act: async ({ values }) => {
+          if (values.instruction !== "a") return
+          calls += 1
+          if (calls === 1) throw connectionReset()
+          seen = lastPublished(published)[1]
+        },
+      })
+
+      await run()
+
+      expect(seen).toMatchObject({ status: "running", attempts: 2 })
+    })
+
+    it("does not try again an error that a retry would not fix", async () => {
+      const act = vi.fn(async () => {
+        throw new Error("Something broke")
+      })
+      const { run, published } = setup({ policy: retrying, act })
+
+      await expect(run()).rejects.toThrow("Something broke")
+
+      expect(act).toHaveBeenCalledTimes(1)
+      expect(lastPublished(published)[1].status).toBe("failed")
+    })
+
+    it("gives up after the step's last attempt, with that attempt's error", async () => {
+      const act = vi.fn(async () => {
+        throw connectionReset()
+      })
+      const { run, published } = setup({
+        policy: { ...retrying, maxAttempts: 2 },
+        act,
+      })
+
+      await expect(run()).rejects.toThrow("read ECONNRESET")
+
+      expect(act).toHaveBeenCalledTimes(2)
+      expect(lastPublished(published)[1]).toMatchObject({
+        status: "failed",
+        error: "read ECONNRESET",
+        attempts: 2,
+      })
+    })
+
+    // A step that sends an email must not send it twice, so every attempt of
+    // a step carries the same key for the service to recognise it by.
+    it("hands every attempt of a step the same idempotency key", async () => {
+      const keys: string[] = []
+      let calls = 0
+      const { run } = setup({
+        policy: retrying,
+        act: async ({ values, idempotencyKey }) => {
+          if (values.instruction !== "a") return
+          keys.push(idempotencyKey)
+          if (++calls === 1) throw connectionReset()
+        },
+      })
+
+      await run()
+
+      expect(keys).toEqual(["run_1:a", "run_1:a"])
+    })
+
+    it("stops waiting to try again when the run is stopped", async () => {
+      const controller = new AbortController()
+      const act = vi.fn(async () => {
+        setTimeout(() => controller.abort(), 10)
+        throw connectionReset()
+      })
+      const { run, published } = setup({
+        policy: { ...retrying, retryDelayMs: 5_000 },
+        signal: controller.signal,
+        act,
+      })
+
+      await expect(run()).rejects.toThrow()
+
+      expect(act).toHaveBeenCalledTimes(1)
+      const step = lastPublished(published)[1]
+      expect(step.status).toBe("cancelled")
+      expect(step.error).toBeUndefined()
+    })
+  })
+
+  describe("a step that runs out of time", () => {
+    it("fails with the time it was given, and is not tried again", async () => {
+      const act = vi.fn(() => new Promise<never>(() => {}))
+      const { run, published, browser } = setup({
+        policy: { timeoutMs: 20, maxAttempts: 3, retryDelayMs: 0 },
+        act,
+      })
+
+      await expect(run()).rejects.toBeInstanceOf(StepTimeoutError)
+
+      expect(act).toHaveBeenCalledTimes(1)
+      expect(lastPublished(published)[1]).toMatchObject({
+        status: "failed",
+        error: "The step took longer than 0.02 s and was stopped",
+      })
+      // Closing the browser is what stops the attempt still driving it.
+      expect(browser.release).toHaveBeenCalledTimes(1)
     })
   })
 
