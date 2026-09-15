@@ -62,7 +62,7 @@ e presença ao vivo — a mesma sensação de estar num arquivo do Figma.
 | **Camada de API** | Server Functions (`"use server"`) e Route Handlers nativos do Next |
 | **Jobs em background** | Trigger.dev `4.5.16` — execução durável + realtime · runtime `node-24` |
 | **Automação de navegador** | Browserbase `@browserbasehq/sdk` `^2.19.1` + Stagehand `^3.6.0` |
-| **Integração de IA** | `anthropic/claude-opus-4-8` com a `CLAUDE_API_KEY` (trocável por `STAGEHAND_MODEL`), roteado pelo Stagehand — `act` · `extract` · `observe` · `agent` |
+| **Integração de IA** | `google/gemini-3.5-flash` por padrão, trocável por `STAGEHAND_MODEL` (Gemini, Claude ou um Ollama local), roteado pelo Stagehand — `act` · `extract` · `observe` · `agent` |
 | **Banco de dados** | Neon Postgres + Drizzle ORM `^0.45.2` (`drizzle-kit` `^0.31.10`, driver `pg` `^8.23.0`) |
 | **Auth** | Clerk `^7.9.1` — Organizations, multi-tenancy, session tasks |
 | **Billing** | Clerk Billing — `@clerk/ui` `^1.32.2`, `PricingTable` e checkout in-app |
@@ -325,7 +325,7 @@ flowchart TB
 
     subgraph BB["🌐 Browserbase · Stagehand v3"]
         Sessao["Sessão de navegador<br/>uma só por execução"]
-        Modelo["anthropic/claude-opus-4-8"]
+        Modelo["modelo de STAGEHAND_MODEL<br/>Gemini por padrão"]
         Grav["Gravação da sessão<br/>HLS"]
     end
 
@@ -714,11 +714,13 @@ no cliente, e o `catch` de quem chamou dispararia **no caso de sucesso**. Quem n
 
 ## ⚠️ Limitações conhecidas
 
-- **O modelo depende de uma chave própria da Anthropic.** Sem a `CLAUDE_API_KEY` no ambiente do
-  worker, o Agent falha com `API key not valid`: foi o que aconteceu de 08/09 a 14/09, com um
-  `google/gemini-3.5-flash` sem chave. As chamadas ao modelo são cobradas nessa chave, e o Agent é o
-  nó mais caro, porque faz várias chamadas por passo. Trocar o modelo pelo `STAGEHAND_MODEL` só
-  funciona com outro modelo `anthropic/`.
+- **O modelo depende de uma chave própria do provedor.** O `STAGEHAND_MODEL` escolhe o modelo
+  (`google/…` por padrão, `anthropic/…` ou `ollama/…`), e a chave vem da variável do provedor:
+  `GEMINI_API_KEY` ou `CLAUDE_API_KEY`. Sem ela, a run falha logo no início dizendo qual variável
+  falta. Um modelo `ollama/…` roda dentro do worker, sem chave, e por isso só funciona no
+  `trigger dev`. As chamadas são cobradas na chave do provedor, e o Agent é o nó mais caro, porque
+  faz várias chamadas por passo. Num pico de demanda do provedor, ele pode falhar depois de minutos
+  de tentativas.
 - **Os e-mails saem do sandbox do Resend** (`onboarding@resend.dev`), que só entrega para o endereço
   dono da conta. Falta um domínio verificado para mandar e-mail para outra pessoa.
 - **O replay demora a aparecer.** A gravação só existe depois que a sessão fecha, e a Browserbase
