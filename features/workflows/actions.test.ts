@@ -431,8 +431,9 @@ describe("getLiveRunIdsAction", () => {
   })
 })
 
-// The realtime subscription calls this when Trigger.dev turns its token down,
-// so a canvas left open past the token's hour keeps getting updates.
+// The canvas calls this to replace its realtime token before the hour is up,
+// and when Trigger.dev turns it down, so a canvas left open keeps getting
+// updates.
 describe("createRunsTokenAction", () => {
   beforeEach(() => {
     auth.mockResolvedValue({ orgId: "org_a" })

@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react"
@@ -18,6 +19,13 @@ import {
   createRunsTokenAction,
   getLiveRunIdsAction,
 } from "@/features/workflows/actions"
+import {
+  isAbortFromReplacement,
+  isRealtimeAuthError,
+  isSubscriptionAbort,
+  mayRefreshToken,
+  TOKEN_REFRESH_INTERVAL_MS,
+} from "@/features/workflows/lib/realtime-subscription"
 import { isRealtimeViewStale } from "@/features/workflows/lib/run-liveness"
 import { workflowRunTag } from "@/features/workflows/lib/run-ownership"
 import {
@@ -40,8 +48,9 @@ const WorkflowRunsContext = createContext<WorkflowRunsValue | null>(null)
 
 interface WorkflowRunsProviderProps {
   workflowId: string
-  // A Trigger.dev public access token scoped to read this workflow's tag, minted
-  // on the server by createRunsReadToken.
+  // The first Trigger.dev public access token, scoped to read this workflow's
+  // tag and minted on the server by createRunsReadToken. Replaced before it
+  // expires (see below).
   publicAccessToken: string
   children: ReactNode
 }
@@ -64,6 +73,10 @@ export function WorkflowRunsProvider({
     { id: subscriptionId, enabled: false }
   )
 
+  // The token the subscription uses: the page's at first, then each one
+  // refreshToken mints.
+  const [accessToken, setAccessToken] = useState(publicAccessToken)
+
   // Bumped to start the subscription over, by remounting it.
   const [generation, setGeneration] = useState(0)
 
@@ -71,29 +84,120 @@ export function WorkflowRunsProvider({
   // state keeps an error after its subscription is gone, and a fresh one never
   // clears it, so one from before the restart is set aside instead of shown.
   const [clearedError, setClearedError] = useState<Error>()
-  const currentError = error === clearedError ? undefined : error
+  const subscriptionError = error === clearedError ? undefined : error
+
+  // What the panels show. An abort is never a lost connection to show: either
+  // the provider replaced the subscription, or it is being started over
+  // (see the effect that handles errors below).
+  const shownError =
+    subscriptionError && isSubscriptionAbort(subscriptionError)
+      ? undefined
+      : subscriptionError
+
+  // Read by resubscribe rather than closed over, so resubscribe stays the same
+  // function from one error to the next, and the timers that call it are not
+  // reset by every error.
+  const errorRef = useRef(error)
+  useEffect(() => {
+    errorRef.current = error
+  }, [error])
+
+  // When the subscription was last replaced, so the abort of the one it
+  // replaced can be told apart (see isAbortFromReplacement).
+  const lastResubscribedAt = useRef<number | undefined>(undefined)
 
   const resubscribe = useCallback(() => {
-    setClearedError(error)
+    lastResubscribedAt.current = Date.now()
+    setClearedError(errorRef.current)
     setGeneration((current) => current + 1)
-  }, [error])
+  }, [])
+
+  // When the token was last replaced, so a token refused right after one was
+  // minted is not answered with yet another (see mayRefreshToken).
+  const lastRefreshedAt = useRef<number | undefined>(undefined)
+
+  // Mints a fresh token on the server and subscribes again with it. A
+  // subscription keeps the token it started with, so a new token only counts
+  // from a new subscription.
+  const refreshToken = useCallback(async () => {
+    lastRefreshedAt.current = Date.now()
+    const token = await createRunsTokenAction(workflowId)
+    setAccessToken(token)
+    resubscribe()
+  }, [workflowId, resubscribe])
+
+  // Tokens last an hour, and this subscription cannot renew its own:
+  // Trigger.dev's React hooks only renew the token of their other streams,
+  // never of a subscription to runs by tag. So the canvas replaces it well
+  // before the hour is up.
+  useEffect(() => {
+    const interval = setInterval(() => {
+      refreshToken().catch((refreshError: unknown) => {
+        // The refusal below gets another go once the old token is turned down.
+        Sentry.captureException(refreshError, {
+          tags: { area: "trigger-realtime" },
+          extra: { workflowId },
+        })
+      })
+    }, TOKEN_REFRESH_INTERVAL_MS)
+
+    return () => clearInterval(interval)
+  }, [refreshToken, workflowId])
 
   // The panels render this error as "Lost connection to the runs", which tells
   // the user but nobody else. A dropped subscription means the canvas stops
-  // showing live progress, so it is worth seeing — an expired public token or a
-  // socket that will not reconnect both land here.
+  // showing live progress, so it is worth seeing — unless it is a token turned
+  // down, which is expected and answered with a new one.
   useEffect(() => {
-    if (!currentError) return
+    if (!subscriptionError) return
+
+    if (isSubscriptionAbort(subscriptionError)) {
+      // The subscription the provider just replaced, aborted on its way out:
+      // nothing was lost, and the new one is already running.
+      if (isAbortFromReplacement(lastResubscribedAt.current, Date.now())) {
+        return
+      }
+
+      // Aborted by something else, and a subscription that fails stays
+      // failed. Electric pauses the stream of a tab that goes into the
+      // background by aborting its request, and a pause that lands while a
+      // response is being read ends the subscription instead.
+      Sentry.logger.warn("Realtime subscription aborted — resubscribing", {
+        workflowId,
+        reason: subscriptionError.message,
+      })
+      resubscribe()
+      return
+    }
+
+    // A tab in the background can sleep past the hour: the browser holds its
+    // timers back, and the old token is refused before the interval above
+    // replaces it.
+    if (
+      isRealtimeAuthError(subscriptionError) &&
+      mayRefreshToken(lastRefreshedAt.current, Date.now())
+    ) {
+      Sentry.logger.info("Realtime runs token refused — refreshing", {
+        workflowId,
+      })
+      refreshToken().catch((refreshError: unknown) => {
+        Sentry.captureException(refreshError, {
+          tags: { area: "trigger-realtime" },
+          extra: { workflowId },
+        })
+      })
+      return
+    }
 
     Sentry.logger.error("Realtime run subscription dropped", {
       workflowId,
-      reason: currentError.message,
+      reason: subscriptionError.message,
     })
-    Sentry.captureException(currentError, {
+    Sentry.captureException(subscriptionError, {
       tags: { area: "trigger-realtime" },
       extra: { workflowId },
     })
-  }, [currentError, workflowId])
+  }, [subscriptionError, workflowId, refreshToken, resubscribe])
 
   // A string, so the watchdog below restarts when the runs shown as going
   // change, not on every update to their progress.
@@ -157,10 +261,7 @@ export function WorkflowRunsProvider({
     }
   }, [liveRunKey, workflowId, resubscribe])
 
-  const value = useMemo(
-    () => ({ runs, error: currentError }),
-    [runs, currentError]
-  )
+  const value = useMemo(() => ({ runs, error: shownError }), [runs, shownError])
 
   return (
     <WorkflowRunsContext.Provider value={value}>
@@ -168,7 +269,7 @@ export function WorkflowRunsProvider({
         key={generation}
         subscriptionId={subscriptionId}
         workflowId={workflowId}
-        publicAccessToken={publicAccessToken}
+        accessToken={accessToken}
       />
       {children}
     </WorkflowRunsContext.Provider>
@@ -177,29 +278,22 @@ export function WorkflowRunsProvider({
 
 // The subscription behind the canvas's run state. It renders nothing: what it
 // receives lands in the state shared under subscriptionId, where the provider
-// reads it. Remounting it is how the provider starts it over.
+// reads it. Remounting it is how the provider starts it over, with a new token
+// or after going silent.
 function RunsSubscription({
   subscriptionId,
   workflowId,
-  publicAccessToken,
+  accessToken,
 }: {
   subscriptionId: string
   workflowId: string
-  publicAccessToken: string
+  accessToken: string
 }) {
-  // Called when Trigger.dev turns the token down, which it does once the
-  // token's hour is up. The subscription reconnects with the new one.
-  const refreshAccessToken = useCallback(
-    () => createRunsTokenAction(workflowId),
-    [workflowId]
-  )
-
   // Runs are tagged workflow:<id> when the Run button triggers them, so the tag
   // is the handle on "every run of this workflow" without tracking run ids.
   useRealtimeRunsWithTag<typeof runWorkflowTask>(workflowRunTag(workflowId), {
     id: subscriptionId,
-    accessToken: publicAccessToken,
-    refreshAccessToken,
+    accessToken,
     // The payload is just the ids we already have on the client — no reason to
     // pull it over the wire on every update. output and metadata are the point.
     skipColumns: ["payload"],

@@ -390,10 +390,10 @@ export async function getLiveRunIdsAction({
   return stillLive.filter((runId) => runId !== undefined)
 }
 
-// A fresh token for a canvas's realtime subscription, which asks for one when
-// Trigger.dev turns down the one it holds (they last an hour). Only for this
-// org's workflows, so a browser cannot mint itself a way into another org's
-// runs.
+// A fresh token for a canvas's realtime subscription. The canvas asks for one
+// before the token it holds runs out (they last an hour), and when Trigger.dev
+// turns it down. Only for this org's workflows, so a browser cannot mint
+// itself a way into another org's runs.
 export async function createRunsTokenAction(workflowId: string) {
   const { orgId } = await auth()
   if (!orgId) throw new Error("No active organization")
