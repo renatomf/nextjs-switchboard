@@ -84,7 +84,10 @@ As decisões ficam em [`docs/adr/`](adr/).
 
 ## Fase D — Features que puxam arquitetura (escolher 3–4)
 
-- [ ] Workflows agendados (cron)
+- [x] Workflows agendados: presets (hora, dia, semana, com fuso), só no Pro, até 2 por organização
+      em cada ambiente. Um agendamento do Trigger.dev por workflow, que dispara a mesma função do
+      botão Run, com o plano conferido no Clerk a cada disparo
+      ([ADR 0008](adr/0008-workflows-agendados.md))
 - [ ] Trigger por webhook (HMAC, rate limiting, `Idempotency-Key`)
 - [ ] Cofre de credenciais (criptografia envelope, segredo fora de log e de prompt)
 - [ ] Artifacts: screenshots e extrações em object storage
