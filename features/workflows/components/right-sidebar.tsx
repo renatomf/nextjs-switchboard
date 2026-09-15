@@ -43,6 +43,10 @@ import {
   type ScheduleSummary,
 } from "@/features/workflows/components/schedule-panel"
 import {
+  WebhookPanel,
+  type WebhookSummary,
+} from "@/features/workflows/components/webhook-panel"
+import {
   useLiveRun,
   useRunHistory,
 } from "@/features/workflows/components/workflow-runs-provider"
@@ -566,9 +570,11 @@ const tabTriggerClassName =
 export function RightSidebar({
   workflowId,
   schedule,
+  webhook,
 }: {
   workflowId: string
   schedule: ScheduleSummary | null
+  webhook: WebhookSummary | null
 }) {
   const [tab, setTab] = useState("toolbar")
 
@@ -597,8 +603,8 @@ export function RightSidebar({
           <TabsTrigger value="editor" className={tabTriggerClassName}>
             Editor
           </TabsTrigger>
-          <TabsTrigger value="schedule" className={tabTriggerClassName}>
-            Schedule
+          <TabsTrigger value="triggers" className={tabTriggerClassName}>
+            Triggers
           </TabsTrigger>
         </TabsList>
         <TabsContent value="toolbar" className="flex min-h-0 flex-col">
@@ -607,9 +613,15 @@ export function RightSidebar({
         <TabsContent value="editor" className="flex min-h-0 flex-col">
           <Inspector key={selected?.id} node={selected} />
         </TabsContent>
-        <TabsContent value="schedule" className="flex min-h-0 flex-col">
+        {/* Both answer the same question — what starts this workflow — so
+            they share a tab, a schedule above and a webhook below. */}
+        <TabsContent value="triggers" className="flex min-h-0 flex-col">
           <Section title="Schedule">
             <SchedulePanel workflowId={workflowId} schedule={schedule} />
+            <div className="border-t border-border px-3 py-1.5 text-sm font-semibold">
+              Webhook
+            </div>
+            <WebhookPanel workflowId={workflowId} webhook={webhook} />
           </Section>
         </TabsContent>
       </Tabs>
