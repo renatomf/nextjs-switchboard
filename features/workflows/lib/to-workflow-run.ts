@@ -13,15 +13,22 @@ export type RunSnapshot = {
   metadata?: Record<string, unknown>
 }
 
+// Whether a run is still going: waiting for its turn, executing, or paused at a
+// wait. The run carries its own booleans, derived from the same status mapping
+// the SDK uses, so the canvas never has to keep its own list of status strings
+// in sync with the ones Trigger.dev happens to send.
+export function isRunLive(
+  run: Pick<RunSnapshot, "isQueued" | "isExecuting" | "isWaiting">
+): boolean {
+  return run.isQueued || run.isExecuting || run.isWaiting
+}
+
 // One run as the console reads it: everything Trigger.dev reports about the run
 // itself, plus the steps resolved out of wherever that particular run left them.
 export function toWorkflowRun<Run extends RunSnapshot>(
   run: Run
 ): Run & { steps: RunStep[]; isLive: boolean; browserbaseSessionId?: string } {
-  // The run carries its own booleans, derived from the same status mapping the
-  // SDK uses, so the canvas never has to keep its own list of status strings in
-  // sync with the ones Trigger.dev happens to send.
-  const isLive = run.isQueued || run.isExecuting || run.isWaiting
+  const isLive = isRunLive(run)
 
   // The task returns its final steps on success, which is the authoritative
   // finished state; metadata is the live view while the run is still going (and
