@@ -314,6 +314,28 @@ describe("runSteps", () => {
       expect(browser.release).toHaveBeenCalledTimes(1)
     })
 
+    // A browser that keeps failing: every attempt but the last drops the
+    // connection, and the step still gets there within its attempts.
+    it("gets there on its last attempt after every other one failed", async () => {
+      const failuresBeforeSuccess = retrying.maxAttempts - 1
+      let calls = 0
+      const { run, browser } = setup({
+        policy: retrying,
+        act: async ({ values, getStagehand }) => {
+          await getStagehand()
+          if (values.instruction !== "a") return "ok"
+          if (++calls <= failuresBeforeSuccess) throw connectionReset()
+          return "ok"
+        },
+      })
+
+      const { steps } = await run()
+
+      expect(calls).toBe(retrying.maxAttempts)
+      expect(steps[1]).toMatchObject({ status: "done", attempts: 3 })
+      expect(browser.release).toHaveBeenCalledTimes(1)
+    })
+
     it("stays running while it tries again, and says which attempt it is on", async () => {
       let seen: RunStep | undefined
       let calls = 0
