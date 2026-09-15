@@ -3,16 +3,20 @@
 import * as Sentry from "@sentry/nextjs"
 import { auth } from "@clerk/nextjs/server"
 import { LiveblocksError } from "@liveblocks/node"
-import { runs } from "@trigger.dev/sdk"
+import { runs, schedules } from "@trigger.dev/sdk"
 import { revalidatePath } from "next/cache"
 import { redirect } from "next/navigation"
 
 import {
   advanceExecution,
+  countOrgSchedules,
   createWorkflow,
   deleteWorkflow,
+  deleteWorkflowSchedule,
   getWorkflow,
+  getWorkflowSchedule,
   publishWorkflowVersion,
+  saveWorkflowSchedule,
 } from "@/features/workflows/data"
 import {
   planRequiredMessage,
@@ -21,6 +25,14 @@ import {
 import { isLiveRunStatus } from "@/features/workflows/lib/run-liveness"
 import { isRunOfWorkflow } from "@/features/workflows/lib/run-ownership"
 import { createRunsReadToken } from "@/features/workflows/lib/runs-token"
+import {
+  cronFor,
+  MAX_SCHEDULES_PER_ORG,
+  parseScheduleInput,
+  SCHEDULED_WORKFLOW_TASK_ID,
+  scheduleDeduplicationKey,
+} from "@/features/workflows/lib/schedule-presets"
+import { triggerEnvironmentOf } from "@/features/workflows/lib/trigger-environment"
 import { startWorkflowRun } from "@/features/workflows/start-run"
 import { PRO_PLAN, PlanRequiredError } from "@/lib/billing"
 import { getLiveblocks } from "@/lib/liveblocks"
@@ -367,4 +379,142 @@ export async function createRunsTokenAction(workflowId: string) {
   Sentry.logger.info("Realtime runs token refreshed", { orgId, workflowId })
 
   return token
+}
+
+// Puts a workflow on a schedule, or changes the schedule it has. Pro only:
+// every scheduled run costs a browser session and model calls, with no one
+// watching it.
+export async function saveWorkflowScheduleAction({
+  workflowId,
+  schedule,
+  graph,
+}: {
+  workflowId: string
+  // From the browser, so checked here before anything uses it.
+  schedule: unknown
+  graph: WorkflowGraph
+}) {
+  const { orgId, has } = await auth()
+  if (!orgId) throw new Error("No active organization")
+
+  Sentry.getIsolationScope().setAttributes({
+    action: "saveWorkflowScheduleAction",
+    orgId,
+    workflowId,
+  })
+
+  if (!has({ plan: PRO_PLAN })) {
+    Sentry.logger.warn("Workflow schedule refused — plan", {
+      orgId,
+      workflowId,
+      requiredPlan: PRO_PLAN,
+    })
+    throw new PlanRequiredError(
+      "Scheduled workflows are part of the Pro plan. Upgrade to schedule this workflow."
+    )
+  }
+
+  const parsed = parseScheduleInput(schedule)
+  if (!parsed.ok) throw new Error(parsed.problem)
+
+  const { preset, timezone } = parsed.schedule
+
+  const workflow = await getWorkflow(orgId, workflowId)
+  if (!workflow) throw new Error("Workflow not found")
+
+  // Development and production share one database, and each has schedules of
+  // its own on Trigger.dev.
+  const environment = triggerEnvironmentOf(process.env.TRIGGER_SECRET_KEY)
+  const existing = await getWorkflowSchedule(orgId, workflowId, environment)
+
+  // The project's Trigger.dev plan allows a handful of schedules in all. A
+  // workflow already scheduled can always change its schedule.
+  if (
+    !existing &&
+    (await countOrgSchedules(orgId, environment)) >= MAX_SCHEDULES_PER_ORG
+  ) {
+    throw new Error(
+      `An organization can have up to ${MAX_SCHEDULES_PER_ORG} scheduled workflows. Remove a schedule to add this one.`
+    )
+  }
+
+  // The canvas as it is now becomes the version the schedule runs, so the first
+  // scheduled run executes what the user just saw. Publishing re-runs
+  // validateGraph too.
+  await publishWorkflowVersion({ orgId, workflowId, graph })
+
+  const cron = cronFor(preset)
+
+  // Creating with a deduplication key Trigger.dev already has updates that
+  // schedule instead, so this one call both creates and changes it.
+  const created = await schedules.create({
+    task: SCHEDULED_WORKFLOW_TASK_ID,
+    cron,
+    timezone,
+    externalId: workflowId,
+    deduplicationKey: scheduleDeduplicationKey(environment, workflowId),
+  })
+
+  // Turned off by a run that found the org no longer on Pro. Saving it again,
+  // once back on Pro, turns it back on.
+  if (!created.active) await schedules.activate(created.id)
+
+  const saved = await saveWorkflowSchedule({
+    orgId,
+    workflowId,
+    environment,
+    preset,
+    timezone,
+    triggerScheduleId: created.id,
+  })
+
+  Sentry.logger.info("Workflow schedule saved", {
+    orgId,
+    workflowId,
+    environment,
+    cron,
+    timezone,
+  })
+
+  return { preset: saved.preset, timezone: saved.timezone }
+}
+
+// Takes a workflow off its schedule. Open to any plan: an org that left Pro can
+// still turn off what it scheduled while on it.
+export async function deleteWorkflowScheduleAction(workflowId: string) {
+  const { orgId } = await auth()
+  if (!orgId) throw new Error("No active organization")
+
+  Sentry.getIsolationScope().setAttributes({
+    action: "deleteWorkflowScheduleAction",
+    orgId,
+    workflowId,
+  })
+
+  const workflow = await getWorkflow(orgId, workflowId)
+  if (!workflow) throw new Error("Workflow not found")
+
+  const environment = triggerEnvironmentOf(process.env.TRIGGER_SECRET_KEY)
+  const existing = await getWorkflowSchedule(orgId, workflowId, environment)
+  if (!existing) return
+
+  // A schedule already gone on Trigger.dev, removed by hand or by a run that
+  // found no record of it, still has its record removed. Any other failure
+  // keeps the record, since it is what lets a second try remove the schedule.
+  await schedules.del(existing.triggerScheduleId).catch((error: unknown) => {
+    const status =
+      typeof error === "object" && error !== null
+        ? (error as { status?: unknown }).status
+        : undefined
+
+    if (status !== 404) throw error
+  })
+
+  await deleteWorkflowSchedule(orgId, workflowId, environment)
+
+  Sentry.logger.info("Workflow schedule removed", {
+    orgId,
+    workflowId,
+    environment,
+  })
 }

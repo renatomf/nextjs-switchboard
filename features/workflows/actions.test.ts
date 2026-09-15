@@ -1,11 +1,13 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { WorkflowGraph } from "@/lib/db/schema"
 import {
   cancelWorkflowRunAction,
   createRunsTokenAction,
+  deleteWorkflowScheduleAction,
   getLiveRunIdsAction,
   runWorkflowAction,
+  saveWorkflowScheduleAction,
 } from "./actions"
 
 // The actions sit between three outside systems: Clerk says who is asking,
@@ -23,6 +25,13 @@ const {
   withWorkflowRunLock,
   getLatestUnsettledExecution,
   createPublicToken,
+  getWorkflowSchedule,
+  countOrgSchedules,
+  saveWorkflowSchedule,
+  deleteWorkflowSchedule,
+  createSchedule,
+  activateSchedule,
+  deleteSchedule,
 } = vi.hoisted(() => ({
   auth: vi.fn(),
   getWorkflow: vi.fn(),
@@ -35,6 +44,13 @@ const {
   withWorkflowRunLock: vi.fn(),
   getLatestUnsettledExecution: vi.fn(),
   createPublicToken: vi.fn(),
+  getWorkflowSchedule: vi.fn(),
+  countOrgSchedules: vi.fn(),
+  saveWorkflowSchedule: vi.fn(),
+  deleteWorkflowSchedule: vi.fn(),
+  createSchedule: vi.fn(),
+  activateSchedule: vi.fn(),
+  deleteSchedule: vi.fn(),
 }))
 
 vi.mock("@clerk/nextjs/server", () => ({ auth }))
@@ -42,6 +58,11 @@ vi.mock("@trigger.dev/sdk", () => ({
   auth: { createPublicToken },
   runs: { retrieve: retrieveRun, cancel: cancelRun },
   tasks: { trigger: triggerTask },
+  schedules: {
+    create: createSchedule,
+    activate: activateSchedule,
+    del: deleteSchedule,
+  },
 }))
 vi.mock("@/features/workflows/data", () => ({
   getWorkflow,
@@ -50,6 +71,10 @@ vi.mock("@/features/workflows/data", () => ({
   advanceExecution,
   withWorkflowRunLock,
   getLatestUnsettledExecution,
+  getWorkflowSchedule,
+  countOrgSchedules,
+  saveWorkflowSchedule,
+  deleteWorkflowSchedule,
   createWorkflow: vi.fn(),
   deleteWorkflow: vi.fn(),
 }))
@@ -560,5 +585,225 @@ describe("createRunsTokenAction", () => {
       "Workflow not found"
     )
     expect(createPublicToken).not.toHaveBeenCalled()
+  })
+})
+
+describe("saveWorkflowScheduleAction", () => {
+  const graph: WorkflowGraph = { nodes: [], edges: [] }
+  const daily = {
+    preset: { frequency: "daily", hour: 9, minute: 30 },
+    timezone: "America/Sao_Paulo",
+  }
+
+  const save = (schedule: unknown = daily) =>
+    saveWorkflowScheduleAction({ workflowId: "wf_1", schedule, graph })
+
+  // Org A, on Pro, owns wf_1, which has no schedule yet. The app talks to the
+  // development environment of Trigger.dev.
+  beforeEach(() => {
+    vi.stubEnv("TRIGGER_SECRET_KEY", "tr_dev_test")
+    auth.mockResolvedValue({ orgId: "org_a", has: () => true })
+    getWorkflow.mockResolvedValue({ id: "wf_1", orgId: "org_a" })
+    getWorkflowSchedule.mockResolvedValue(undefined)
+    countOrgSchedules.mockResolvedValue(0)
+    publishWorkflowVersion.mockResolvedValue({ id: "ver_1" })
+    createSchedule.mockResolvedValue({ id: "sched_1", active: true })
+    saveWorkflowSchedule.mockImplementation(async (schedule) => schedule)
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it("schedules the workflow on Trigger.dev and records the schedule", async () => {
+    await save()
+
+    expect(createSchedule).toHaveBeenCalledWith({
+      task: "run-scheduled-workflow",
+      cron: "30 9 * * *",
+      timezone: "America/Sao_Paulo",
+      externalId: "wf_1",
+      deduplicationKey: "dev:workflow:wf_1",
+    })
+    expect(saveWorkflowSchedule).toHaveBeenCalledWith({
+      orgId: "org_a",
+      workflowId: "wf_1",
+      environment: "dev",
+      preset: daily.preset,
+      timezone: "America/Sao_Paulo",
+      triggerScheduleId: "sched_1",
+    })
+  })
+
+  // The first scheduled run executes what is on the canvas now, not whatever
+  // version happened to run last.
+  it("publishes the canvas as the version the schedule runs", async () => {
+    await save()
+
+    expect(publishWorkflowVersion).toHaveBeenCalledWith({
+      orgId: "org_a",
+      workflowId: "wf_1",
+      graph,
+    })
+  })
+
+  // A schedule a run turned off when the org left Pro, saved again once it
+  // is back.
+  it("turns back on a schedule Trigger.dev had turned off", async () => {
+    createSchedule.mockResolvedValue({ id: "sched_1", active: false })
+
+    await save()
+
+    expect(activateSchedule).toHaveBeenCalledWith("sched_1")
+  })
+
+  it("requires an active organization", async () => {
+    auth.mockResolvedValue({ orgId: null, has: () => true })
+
+    await expect(save()).rejects.toThrow("No active organization")
+    expect(createSchedule).not.toHaveBeenCalled()
+  })
+
+  // Every scheduled run costs a browser session and model calls, with no one
+  // watching it.
+  it("is for the Pro plan only", async () => {
+    auth.mockResolvedValue({ orgId: "org_a", has: () => false })
+
+    await expect(save()).rejects.toThrow(
+      "Scheduled workflows are part of the Pro plan"
+    )
+    expect(publishWorkflowVersion).not.toHaveBeenCalled()
+    expect(createSchedule).not.toHaveBeenCalled()
+  })
+
+  it("refuses another org's workflow", async () => {
+    getWorkflow.mockResolvedValue(undefined)
+
+    await expect(save()).rejects.toThrow("Workflow not found")
+    expect(publishWorkflowVersion).not.toHaveBeenCalled()
+    expect(createSchedule).not.toHaveBeenCalled()
+  })
+
+  it("refuses a schedule the app does not offer", async () => {
+    await expect(
+      save({ preset: { frequency: "minutely", minute: 0 }, timezone: "UTC" })
+    ).rejects.toThrow("Not a schedule this app offers")
+    expect(publishWorkflowVersion).not.toHaveBeenCalled()
+    expect(createSchedule).not.toHaveBeenCalled()
+  })
+
+  // The project's Trigger.dev plan allows a handful of schedules in all, so
+  // each org gets a small share of them.
+  it("refuses a new schedule past the org's share", async () => {
+    countOrgSchedules.mockResolvedValue(2)
+
+    await expect(save()).rejects.toThrow("up to 2 scheduled workflows")
+    expect(publishWorkflowVersion).not.toHaveBeenCalled()
+    expect(createSchedule).not.toHaveBeenCalled()
+  })
+
+  it("still lets a scheduled workflow change its schedule at the limit", async () => {
+    countOrgSchedules.mockResolvedValue(2)
+    getWorkflowSchedule.mockResolvedValue({
+      workflowId: "wf_1",
+      triggerScheduleId: "sched_1",
+      active: true,
+    })
+
+    await save()
+
+    expect(createSchedule).toHaveBeenCalled()
+  })
+
+  // Development and production share one database: each keeps its own
+  // schedule of the same workflow.
+  it("keeps the environments' schedules apart", async () => {
+    vi.stubEnv("TRIGGER_SECRET_KEY", "tr_prod_test")
+
+    await save()
+
+    expect(getWorkflowSchedule).toHaveBeenCalledWith("org_a", "wf_1", "prod")
+    expect(createSchedule).toHaveBeenCalledWith(
+      expect.objectContaining({ deduplicationKey: "prod:workflow:wf_1" })
+    )
+    expect(saveWorkflowSchedule).toHaveBeenCalledWith(
+      expect.objectContaining({ environment: "prod" })
+    )
+  })
+})
+
+describe("deleteWorkflowScheduleAction", () => {
+  // Org A owns wf_1, scheduled in development as sched_1.
+  beforeEach(() => {
+    vi.stubEnv("TRIGGER_SECRET_KEY", "tr_dev_test")
+    auth.mockResolvedValue({ orgId: "org_a", has: () => true })
+    getWorkflow.mockResolvedValue({ id: "wf_1", orgId: "org_a" })
+    getWorkflowSchedule.mockResolvedValue({
+      workflowId: "wf_1",
+      triggerScheduleId: "sched_1",
+    })
+    deleteSchedule.mockResolvedValue({ id: "sched_1" })
+    deleteWorkflowSchedule.mockResolvedValue(undefined)
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it("removes the schedule from Trigger.dev and the record of it", async () => {
+    await deleteWorkflowScheduleAction("wf_1")
+
+    expect(deleteSchedule).toHaveBeenCalledWith("sched_1")
+    expect(deleteWorkflowSchedule).toHaveBeenCalledWith("org_a", "wf_1", "dev")
+  })
+
+  // An org that left Pro can still turn off what it scheduled while on it.
+  it("works for an org no longer on Pro", async () => {
+    auth.mockResolvedValue({ orgId: "org_a", has: () => false })
+
+    await deleteWorkflowScheduleAction("wf_1")
+
+    expect(deleteSchedule).toHaveBeenCalledWith("sched_1")
+  })
+
+  it("refuses another org's workflow", async () => {
+    getWorkflow.mockResolvedValue(undefined)
+
+    await expect(deleteWorkflowScheduleAction("wf_other")).rejects.toThrow(
+      "Workflow not found"
+    )
+    expect(deleteSchedule).not.toHaveBeenCalled()
+  })
+
+  it("does nothing for a workflow with no schedule", async () => {
+    getWorkflowSchedule.mockResolvedValue(undefined)
+
+    await expect(deleteWorkflowScheduleAction("wf_1")).resolves.toBeUndefined()
+    expect(deleteSchedule).not.toHaveBeenCalled()
+    expect(deleteWorkflowSchedule).not.toHaveBeenCalled()
+  })
+
+  // Removed on Trigger.dev already, by hand or by a run that found no record
+  // of it: the record goes too.
+  it("still removes the record when Trigger.dev no longer has the schedule", async () => {
+    deleteSchedule.mockRejectedValue(
+      Object.assign(new Error("Not found"), { status: 404 })
+    )
+
+    await deleteWorkflowScheduleAction("wf_1")
+
+    expect(deleteWorkflowSchedule).toHaveBeenCalledWith("org_a", "wf_1", "dev")
+  })
+
+  // Otherwise the record is what would let a second try remove it.
+  it("keeps the record when Trigger.dev fails to remove the schedule", async () => {
+    deleteSchedule.mockRejectedValue(
+      Object.assign(new Error("Internal error"), { status: 500 })
+    )
+
+    await expect(deleteWorkflowScheduleAction("wf_1")).rejects.toThrow(
+      "Internal error"
+    )
+    expect(deleteWorkflowSchedule).not.toHaveBeenCalled()
   })
 })

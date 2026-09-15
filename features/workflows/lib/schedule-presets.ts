@@ -6,7 +6,7 @@ export type SchedulePreset =
   | { frequency: "daily"; hour: number; minute: number }
   | { frequency: "weekly"; dayOfWeek: number; hour: number; minute: number }
 
-export type ScheduleInput = {
+type ScheduleInput = {
   preset: SchedulePreset
   // An IANA time zone, such as "America/Sao_Paulo". Trigger.dev follows its
   // daylight saving changes.
@@ -16,6 +16,11 @@ export type ScheduleInput = {
 // The project's Trigger.dev plan allows 10 schedules across all of its
 // environments, so each organization gets a small share.
 export const MAX_SCHEDULES_PER_ORG = 2
+
+// The Trigger.dev task every workflow schedule is attached to. Named here
+// rather than read off the task, so the app can refer to it without importing
+// the worker's code.
+export const SCHEDULED_WORKFLOW_TASK_ID = "run-scheduled-workflow"
 
 // The cron expression Trigger.dev runs a preset on. Cron counts the days of
 // the week from Sunday, as 0, like dayOfWeek does.
