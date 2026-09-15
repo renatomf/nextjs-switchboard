@@ -36,7 +36,7 @@ import { triggerEnvironmentOf } from "@/features/workflows/lib/trigger-environme
 import { startWorkflowRun } from "@/features/workflows/start-run"
 import { PRO_PLAN, PlanRequiredError } from "@/lib/billing"
 import { getLiveblocks } from "@/lib/liveblocks"
-import { WorkflowGraph } from "@/lib/db/schema"
+import { WorkflowGraph, type WorkflowSchedule } from "@/lib/db/schema"
 
 // The most runs one liveness check looks up. The canvas shows at most one run
 // going, so this only bounds a caller that is not the canvas: each id costs a
@@ -381,9 +381,20 @@ export async function createRunsTokenAction(workflowId: string) {
   return token
 }
 
+type SaveScheduleResult =
+  | {
+      ok: true
+      schedule: Pick<WorkflowSchedule, "preset" | "timezone" | "active">
+    }
+  | { ok: false; error: string }
+
 // Puts a workflow on a schedule, or changes the schedule it has. Pro only:
 // every scheduled run costs a browser session and model calls, with no one
 // watching it.
+//
+// A refusal the user can act on (the plan, the schedule, the org's share of
+// schedules) comes back as a result rather than a throw: in production the
+// message of a thrown error does not reach the browser.
 export async function saveWorkflowScheduleAction({
   workflowId,
   schedule,
@@ -393,7 +404,7 @@ export async function saveWorkflowScheduleAction({
   // From the browser, so checked here before anything uses it.
   schedule: unknown
   graph: WorkflowGraph
-}) {
+}): Promise<SaveScheduleResult> {
   const { orgId, has } = await auth()
   if (!orgId) throw new Error("No active organization")
 
@@ -409,13 +420,15 @@ export async function saveWorkflowScheduleAction({
       workflowId,
       requiredPlan: PRO_PLAN,
     })
-    throw new PlanRequiredError(
-      "Scheduled workflows are part of the Pro plan. Upgrade to schedule this workflow."
-    )
+    return {
+      ok: false,
+      error:
+        "Scheduled workflows are part of the Pro plan. Upgrade to schedule this workflow.",
+    }
   }
 
   const parsed = parseScheduleInput(schedule)
-  if (!parsed.ok) throw new Error(parsed.problem)
+  if (!parsed.ok) return { ok: false, error: parsed.problem }
 
   const { preset, timezone } = parsed.schedule
 
@@ -433,9 +446,10 @@ export async function saveWorkflowScheduleAction({
     !existing &&
     (await countOrgSchedules(orgId, environment)) >= MAX_SCHEDULES_PER_ORG
   ) {
-    throw new Error(
-      `An organization can have up to ${MAX_SCHEDULES_PER_ORG} scheduled workflows. Remove a schedule to add this one.`
-    )
+    return {
+      ok: false,
+      error: `An organization can have up to ${MAX_SCHEDULES_PER_ORG} scheduled workflows. Remove a schedule to add this one.`,
+    }
   }
 
   // The canvas as it is now becomes the version the schedule runs, so the first
@@ -476,7 +490,10 @@ export async function saveWorkflowScheduleAction({
     timezone,
   })
 
-  return { preset: saved.preset, timezone: saved.timezone }
+  return {
+    ok: true,
+    schedule: { preset: saved.preset, timezone: saved.timezone, active: true },
+  }
 }
 
 // Takes a workflow off its schedule. Open to any plan: an org that left Pro can

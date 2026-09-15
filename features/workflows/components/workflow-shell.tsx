@@ -1,6 +1,7 @@
 import { Canvas } from "@/features/workflows/components/canvas"
 import { ConsolePanel } from "@/features/workflows/components/console-panel"
 import { RightSidebar } from "@/features/workflows/components/right-sidebar"
+import type { ScheduleSummary } from "@/features/workflows/components/schedule-panel"
 import {
   ResizableHandle,
   ResizablePanel,
@@ -9,9 +10,11 @@ import {
 
 interface WorkflowShellProps {
   workflowId: string
+  // The workflow's schedule in this environment, read by the page.
+  schedule: ScheduleSummary | null
 }
 
-export function WorkflowShell({ workflowId }: WorkflowShellProps) {
+export function WorkflowShell({ workflowId, schedule }: WorkflowShellProps) {
   return (
     <ResizablePanelGroup
       id={`workflow-${workflowId}`}
@@ -40,7 +43,7 @@ export function WorkflowShell({ workflowId }: WorkflowShellProps) {
         maxSize="36rem"
         groupResizeBehavior="preserve-pixel-size"
       >
-        <RightSidebar workflowId={workflowId} />
+        <RightSidebar workflowId={workflowId} schedule={schedule} />
       </ResizablePanel>
     </ResizablePanelGroup>
   )

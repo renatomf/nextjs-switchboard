@@ -5,12 +5,13 @@ import { ReactFlowProvider } from "@xyflow/react"
 
 import { PRO_PLAN, PlanRequiredError } from "@/lib/billing"
 import { getLiveblocks } from "@/lib/liveblocks"
-import { getWorkflow } from "@/features/workflows/data"
+import { getWorkflow, getWorkflowSchedule } from "@/features/workflows/data"
 import {
   planRequiredMessage,
   premiumNodeLabelsOnCanvas,
 } from "@/features/workflows/lib/premium-gate"
 import { createRunsReadToken } from "@/features/workflows/lib/runs-token"
+import { triggerEnvironmentOf } from "@/features/workflows/lib/trigger-environment"
 import { PlanRequired } from "@/features/workflows/components/plan-required"
 import { Room } from "@/features/workflows/components/room"
 import { WorkflowRunsProvider } from "@/features/workflows/components/workflow-runs-provider"
@@ -96,7 +97,20 @@ export default async function Page({
     },
   })
 
-  const publicAccessToken = await createRunsReadToken(id)
+  // The run token, and what the Schedule tab shows: the workflow's schedule in
+  // this environment, like the schedule itself.
+  const [publicAccessToken, saved] = await Promise.all([
+    createRunsReadToken(id),
+    getWorkflowSchedule(
+      orgId,
+      id,
+      triggerEnvironmentOf(process.env.TRIGGER_SECRET_KEY)
+    ),
+  ])
+
+  const schedule = saved
+    ? { preset: saved.preset, timezone: saved.timezone, active: saved.active }
+    : null
 
   // The palette lives in the sidebar, outside <ReactFlow>, so the provider has
   // to sit above both of them for the two to share a single React Flow store.
@@ -107,7 +121,7 @@ export default async function Page({
           workflowId={id}
           publicAccessToken={publicAccessToken}
         >
-          <WorkflowShell workflowId={id} />
+          <WorkflowShell workflowId={id} schedule={schedule} />
         </WorkflowRunsProvider>
       </ReactFlowProvider>
     </Room>

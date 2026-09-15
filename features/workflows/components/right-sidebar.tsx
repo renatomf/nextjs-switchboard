@@ -39,6 +39,10 @@ import {
 } from "@/features/workflows/actions"
 import { NodeIcon } from "@/features/workflows/components/node-icon"
 import {
+  SchedulePanel,
+  type ScheduleSummary,
+} from "@/features/workflows/components/schedule-panel"
+import {
   useLiveRun,
   useRunHistory,
 } from "@/features/workflows/components/workflow-runs-provider"
@@ -559,7 +563,13 @@ function RunControl({ workflowId }: { workflowId: string }) {
 const tabTriggerClassName =
   "flex-none rounded-sm data-active:bg-accent! data-active:text-accent-foreground! data-active:shadow-none! dark:data-active:border-transparent!"
 
-export function RightSidebar({ workflowId }: { workflowId: string }) {
+export function RightSidebar({
+  workflowId,
+  schedule,
+}: {
+  workflowId: string
+  schedule: ScheduleSummary | null
+}) {
   const [tab, setTab] = useState("toolbar")
 
   // The currently selected node, read from the shared React Flow store.
@@ -587,12 +597,20 @@ export function RightSidebar({ workflowId }: { workflowId: string }) {
           <TabsTrigger value="editor" className={tabTriggerClassName}>
             Editor
           </TabsTrigger>
+          <TabsTrigger value="schedule" className={tabTriggerClassName}>
+            Schedule
+          </TabsTrigger>
         </TabsList>
         <TabsContent value="toolbar" className="flex min-h-0 flex-col">
           <Palette />
         </TabsContent>
         <TabsContent value="editor" className="flex min-h-0 flex-col">
           <Inspector key={selected?.id} node={selected} />
+        </TabsContent>
+        <TabsContent value="schedule" className="flex min-h-0 flex-col">
+          <Section title="Schedule">
+            <SchedulePanel workflowId={workflowId} schedule={schedule} />
+          </Section>
         </TabsContent>
       </Tabs>
     </div>

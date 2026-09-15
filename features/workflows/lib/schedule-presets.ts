@@ -35,6 +35,38 @@ export function cronFor(preset: SchedulePreset): string {
   }
 }
 
+// Cron's days of the week, from Sunday, as 0.
+export const WEEKDAY_NAMES = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+] as const
+
+const twoDigits = (value: number) => String(value).padStart(2, "0")
+
+// When a schedule runs, in words, for the Schedule tab.
+export function describeSchedule(
+  preset: SchedulePreset,
+  timezone: string
+): string {
+  return `${describeWhen(preset)} (${timezone})`
+}
+
+function describeWhen(preset: SchedulePreset): string {
+  switch (preset.frequency) {
+    case "hourly":
+      return `Every hour at :${twoDigits(preset.minute)}`
+    case "daily":
+      return `Every day at ${twoDigits(preset.hour)}:${twoDigits(preset.minute)}`
+    case "weekly":
+      return `Every ${WEEKDAY_NAMES[preset.dayOfWeek]} at ${twoDigits(preset.hour)}:${twoDigits(preset.minute)}`
+  }
+}
+
 // Trigger.dev keys a schedule's deduplication per project, not per
 // environment, and development and production share one database, so the
 // same workflow exists in both. Without the environment in the key, saving

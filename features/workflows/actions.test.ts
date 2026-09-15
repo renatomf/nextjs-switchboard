@@ -616,7 +616,14 @@ describe("saveWorkflowScheduleAction", () => {
   })
 
   it("schedules the workflow on Trigger.dev and records the schedule", async () => {
-    await save()
+    await expect(save()).resolves.toEqual({
+      ok: true,
+      schedule: {
+        preset: daily.preset,
+        timezone: "America/Sao_Paulo",
+        active: true,
+      },
+    })
 
     expect(createSchedule).toHaveBeenCalledWith({
       task: "run-scheduled-workflow",
@@ -665,13 +672,17 @@ describe("saveWorkflowScheduleAction", () => {
   })
 
   // Every scheduled run costs a browser session and model calls, with no one
-  // watching it.
+  // watching it. A refusal the user can act on comes back as a result: the
+  // message of a thrown error does not reach the browser in production.
   it("is for the Pro plan only", async () => {
     auth.mockResolvedValue({ orgId: "org_a", has: () => false })
 
-    await expect(save()).rejects.toThrow(
-      "Scheduled workflows are part of the Pro plan"
-    )
+    await expect(save()).resolves.toEqual({
+      ok: false,
+      error: expect.stringContaining(
+        "Scheduled workflows are part of the Pro plan"
+      ),
+    })
     expect(publishWorkflowVersion).not.toHaveBeenCalled()
     expect(createSchedule).not.toHaveBeenCalled()
   })
@@ -687,7 +698,7 @@ describe("saveWorkflowScheduleAction", () => {
   it("refuses a schedule the app does not offer", async () => {
     await expect(
       save({ preset: { frequency: "minutely", minute: 0 }, timezone: "UTC" })
-    ).rejects.toThrow("Not a schedule this app offers")
+    ).resolves.toEqual({ ok: false, error: "Not a schedule this app offers" })
     expect(publishWorkflowVersion).not.toHaveBeenCalled()
     expect(createSchedule).not.toHaveBeenCalled()
   })
@@ -697,7 +708,10 @@ describe("saveWorkflowScheduleAction", () => {
   it("refuses a new schedule past the org's share", async () => {
     countOrgSchedules.mockResolvedValue(2)
 
-    await expect(save()).rejects.toThrow("up to 2 scheduled workflows")
+    await expect(save()).resolves.toEqual({
+      ok: false,
+      error: expect.stringContaining("up to 2 scheduled workflows"),
+    })
     expect(publishWorkflowVersion).not.toHaveBeenCalled()
     expect(createSchedule).not.toHaveBeenCalled()
   })
