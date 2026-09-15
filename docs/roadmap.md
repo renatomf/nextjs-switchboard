@@ -63,8 +63,12 @@ As decisões ficam em [`docs/adr/`](adr/).
 - [x] **C.1** Concorrência por organização, conforme o plano: filas `runs-free` (1 por vez) e
       `runs-pro` (3), com a org como `concurrencyKey`. A run acima do limite espera como `queued`
       ([ADR 0006](adr/0006-concorrencia-por-org.md)). Uma run por workflow no Pro fica para a C.2
-- [ ] **C.2** Idempotência no Run e no Send Email (`idempotencyKey` da Resend = `runId:nodeId`)
-- [ ] **C.3** Taxonomia de erros, retry por nó na mesma sessão, `AbortTaskRunError`, timeout por nó
+- [x] **C.2** Uma run ao vivo por workflow: a action confere a org dona do workflow e, sob uma trava
+      por workflow no Postgres (`pg_advisory_xact_lock`), devolve a run que ainda não terminou em vez
+      de disparar outra. A checagem lê a tabela `executions` e confirma a run pelo id no Trigger.dev.
+      Sem a trava, dois Runs com 1–2 s de diferença passavam (visto no teste com duas abas)
+- [ ] **C.3** Taxonomia de erros, retry por nó na mesma sessão, `AbortTaskRunError`, timeout por nó.
+      Com os retries, a idempotência do Send Email (`idempotencyKey` da Resend = `runId:nodeId`)
 - [ ] **C.4** Testes de falha (browser fake que falha N vezes) e de dois Runs simultâneos
 - [ ] **C.5** Reconciliar execuções presas em `running` (runs que travaram sem acionar hook) com a
       API do Trigger.dev, numa task agendada
@@ -123,4 +127,6 @@ bloco `current gaps` do arquivo de teste correspondente.
 | ~~O nó Agent devolvia a falha do agente como resultado (`success: false`), e o passo aparecia como `done` numa run `COMPLETED`~~ | `agent.ts` | ✅ | Resolvido na B.3: o passo falha com a mensagem do agente |
 | ~~Um campo obrigatório vazio passava na validação, e a run quebrava no meio com um erro interno do Stagehand (um Agent sem instrução deu "Cannot read properties of undefined (reading 'toolTimeout')")~~ | `validate-graph.ts` | ✅ | Resolvido na B.3: o `validateGraph` recusa o passo antes do Run e diz qual campo preencher |
 | ~~O Agent falhava em toda run desde 08/09 com "API key not valid". O modelo tinha passado a ser `google/gemini-3.5-flash` sem chave, e a execução do agente não aceita esse caminho~~ | `run-workflow.ts` | ✅ | Resolvido: de volta ao `anthropic/claude-opus-4-8`, com a `CLAUDE_API_KEY` |
+| O token público do Trigger.dev que a página do workflow gera vale 1 hora e nunca é renovado: um canvas aberto por mais tempo para de receber atualizações das runs. No teste com duas abas, as duas ficaram com o Stop parado até o F5 (o Sentry não registrou a queda da assinatura, então a causa não foi confirmada) | `app/(dashboard)/workflows/[id]/page.tsx` | 🟡 | Renovar o token antes de expirar |
+| Um Agent terminou com `success: false` e uma mensagem dizendo que concluiu a tarefa, e a mesma instrução deu `success: true` na run seguinte. O nó trata `success: false` como falha, então o passo ficou vermelho | `agent.ts` | 🟡 | C.3: entender o que o `success` do agente do Stagehand significa antes de decidir o que é falha |
 | O supervisor de limpeza do Stagehand não sobe no worker de desenvolvimento: o `trigger dev` embute o pacote inteiro no bundle (207 arquivos) apesar do `external`, e o `cli.js` que ele procura fica de fora. No deploy, a documentação diz que um pacote `external` é instalado no worker, então lá ele deve subir: confirmar nos logs da primeira run publicada | `trigger.config.ts` | 🟡 | C.5, junto com as sessões órfãs |

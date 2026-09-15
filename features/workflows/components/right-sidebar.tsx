@@ -1,6 +1,12 @@
 "use client"
 
-import { useRef, useState, useTransition, type FocusEvent } from "react"
+import {
+  useEffect,
+  useRef,
+  useState,
+  useTransition,
+  type FocusEvent,
+} from "react"
 import { useRouter } from "next/navigation"
 import * as Sentry from "@sentry/nextjs"
 import { Lock, MoreHorizontal, Play, Square, Trash2 } from "lucide-react"
@@ -417,6 +423,11 @@ function ActionsMenu({ workflowId }: { workflowId: string }) {
   )
 }
 
+// How long the run control waits for a run it just started to show up on the
+// realtime subscription. A healthy subscription reports it within a second or
+// two.
+const SETTLE_TIMEOUT_MS = 15_000
+
 // The header's run control: it starts a run of the current workflow, and while
 // that run is going it turns into the Stop button that cancels it.
 function RunControl({ workflowId }: { workflowId: string }) {
@@ -434,6 +445,17 @@ function RunControl({ workflowId }: { workflowId: string }) {
     startedId !== null && !runs.some((run) => run.id === startedId)
 
   const activeRunId = liveRun?.id ?? (settling ? startedId : null)
+
+  // Held only until the subscription reports the run, and never for long: a
+  // run that never shows up there (a dropped subscription, an expired token)
+  // would otherwise leave the button on Stop for good. Letting go is safe, since
+  // a Run clicked while that run is still going gets it handed back.
+  useEffect(() => {
+    if (!settling) return
+
+    const timer = setTimeout(() => setStartedId(null), SETTLE_TIMEOUT_MS)
+    return () => clearTimeout(timer)
+  }, [settling])
 
   const handleRun = () => {
     const graph = { nodes: getNodes(), edges: getEdges() }

@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from "drizzle-orm"
+import { and, desc, eq, inArray, sql } from "drizzle-orm"
 
 import { getDb } from "@/lib/db"
 import {
@@ -115,6 +115,45 @@ export async function advanceExecution({
       set: changes,
       setWhere: inArray(executions.status, [...allowedFrom(event)]),
     })
+}
+
+// Runs fn while holding a lock on starting a run of this workflow, so two Runs
+// landing together take turns instead of both finding no run going. A
+// transaction-scoped advisory lock: it is released when the transaction ends,
+// however fn ends, and it works through PgBouncer's transaction pooling. The
+// transaction holds a pooled connection for as long as fn takes, a couple of
+// seconds around the call to Trigger.dev.
+export async function withWorkflowRunLock<T>(
+  workflowId: string,
+  fn: () => Promise<T>
+): Promise<T> {
+  return getDb().transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtextextended(${`run-start:${workflowId}`}, 0))`
+    )
+    return fn()
+  })
+}
+
+// The newest execution of this workflow that has not settled, if any.
+export async function getLatestUnsettledExecution(
+  orgId: string,
+  workflowId: string
+) {
+  const [execution] = await getDb()
+    .select({ runId: executions.runId })
+    .from(executions)
+    .where(
+      and(
+        eq(executions.orgId, orgId),
+        eq(executions.workflowId, workflowId),
+        inArray(executions.status, ["queued", "running"])
+      )
+    )
+    .orderBy(desc(executions.createdAt))
+    .limit(1)
+
+  return execution
 }
 
 export async function setExecutionBrowserSession(

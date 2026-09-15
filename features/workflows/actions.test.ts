@@ -15,6 +15,8 @@ const {
   retrieveRun,
   cancelRun,
   triggerTask,
+  withWorkflowRunLock,
+  getLatestUnsettledExecution,
 } = vi.hoisted(() => ({
   auth: vi.fn(),
   getWorkflow: vi.fn(),
@@ -24,6 +26,8 @@ const {
   retrieveRun: vi.fn(),
   cancelRun: vi.fn(),
   triggerTask: vi.fn(),
+  withWorkflowRunLock: vi.fn(),
+  getLatestUnsettledExecution: vi.fn(),
 }))
 
 vi.mock("@clerk/nextjs/server", () => ({ auth }))
@@ -36,6 +40,8 @@ vi.mock("@/features/workflows/data", () => ({
   publishWorkflowVersion,
   recordExecution,
   advanceExecution,
+  withWorkflowRunLock,
+  getLatestUnsettledExecution,
   createWorkflow: vi.fn(),
   deleteWorkflow: vi.fn(),
 }))
@@ -52,10 +58,100 @@ describe("runWorkflowAction", () => {
   // do not matter here.
   const graph: WorkflowGraph = { nodes: [], edges: [] }
 
+  // Whether the workflow's run lock is held right now, so a test can tell
+  // which calls happened under it.
+  const lock = { held: false }
+
+  // Org A owns wf_1, which has no run going.
   beforeEach(() => {
     auth.mockResolvedValue({ orgId: "org_a", has: () => true })
+    getWorkflow.mockResolvedValue({ id: "wf_1", orgId: "org_a" })
+    getLatestUnsettledExecution.mockResolvedValue(undefined)
     triggerTask.mockResolvedValue({ id: "run_1" })
     recordExecution.mockResolvedValue(undefined)
+    withWorkflowRunLock.mockImplementation(
+      async (_workflowId: string, fn: () => Promise<unknown>) => {
+        lock.held = true
+        try {
+          return await fn()
+        } finally {
+          lock.held = false
+        }
+      }
+    )
+  })
+
+  // The canvas assumes a workflow has at most one run going: its Run button
+  // turns into Stop, and Stop reaches a single run. Two tabs, or two people on
+  // the shared canvas, used to start a second one anyway.
+  describe("one run going per workflow", () => {
+    it("hands back the run already going instead of starting another", async () => {
+      getLatestUnsettledExecution.mockResolvedValue({ runId: "run_live" })
+      retrieveRun.mockResolvedValue({ status: "EXECUTING" })
+
+      await expect(runWorkflowAction({ id: "wf_1", graph })).resolves.toEqual({
+        id: "run_live",
+      })
+      expect(getLatestUnsettledExecution).toHaveBeenCalledWith("org_a", "wf_1")
+      expect(retrieveRun).toHaveBeenCalledWith("run_live")
+      expect(publishWorkflowVersion).not.toHaveBeenCalled()
+      expect(triggerTask).not.toHaveBeenCalled()
+      expect(recordExecution).not.toHaveBeenCalled()
+    })
+
+    // An execution row can be left unsettled by a run that crashed without a
+    // hook. Trigger.dev, asked by run id, has the last word on it.
+    it("starts a run when the unsettled execution's run has already ended", async () => {
+      getLatestUnsettledExecution.mockResolvedValue({ runId: "run_old" })
+      retrieveRun.mockResolvedValue({ status: "COMPLETED" })
+      publishWorkflowVersion.mockResolvedValue({ id: "ver_1" })
+
+      await expect(runWorkflowAction({ id: "wf_1", graph })).resolves.toEqual({
+        id: "run_1",
+      })
+      expect(triggerTask).toHaveBeenCalled()
+    })
+
+    // Two Runs used to overlap for the couple of seconds between the check and
+    // the trigger: both saw no run, and both started one. Under the workflow's
+    // lock the second waits, and then finds the execution the first recorded.
+    it("checks, starts and records the run while holding the workflow's lock", async () => {
+      const underLock: string[] = []
+      getLatestUnsettledExecution.mockImplementation(async () => {
+        if (lock.held) underLock.push("check")
+      })
+      triggerTask.mockImplementation(async () => {
+        if (lock.held) underLock.push("trigger")
+        return { id: "run_1" }
+      })
+      recordExecution.mockImplementation(async () => {
+        if (lock.held) underLock.push("record")
+      })
+      publishWorkflowVersion.mockResolvedValue({ id: "ver_1" })
+
+      await runWorkflowAction({ id: "wf_1", graph })
+
+      expect(withWorkflowRunLock).toHaveBeenCalledWith(
+        "wf_1",
+        expect.any(Function)
+      )
+      expect(underLock).toEqual(["check", "trigger", "record"])
+    })
+
+    // Looking the runs up first would tell a caller holding another org's
+    // workflow id whether that workflow is running, and hand over its run id.
+    it("refuses another org's workflow before looking at its runs", async () => {
+      getWorkflow.mockResolvedValue(undefined)
+
+      await expect(
+        runWorkflowAction({ id: "wf_other", graph })
+      ).rejects.toThrow("Workflow not found")
+      expect(getWorkflow).toHaveBeenCalledWith("org_a", "wf_other")
+      expect(withWorkflowRunLock).not.toHaveBeenCalled()
+      expect(getLatestUnsettledExecution).not.toHaveBeenCalled()
+      expect(publishWorkflowVersion).not.toHaveBeenCalled()
+      expect(triggerTask).not.toHaveBeenCalled()
+    })
   })
 
   it("publishes the graph as a version and runs exactly that version", async () => {
