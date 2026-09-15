@@ -23,27 +23,22 @@ import {
   planRequiredMessage,
   premiumNodeLabels,
 } from "@/features/workflows/lib/premium-gate"
+import { isLiveRunStatus } from "@/features/workflows/lib/run-liveness"
 import { runQueueFor } from "@/features/workflows/lib/run-queues"
 import {
   isRunOfWorkflow,
   RUN_WORKFLOW_TASK_ID,
   workflowRunTag,
 } from "@/features/workflows/lib/run-ownership"
+import { createRunsReadToken } from "@/features/workflows/lib/runs-token"
 import { PRO_PLAN, PlanRequiredError } from "@/lib/billing"
 import { getLiveblocks } from "@/lib/liveblocks"
 import { WorkflowGraph } from "@/lib/db/schema"
 
-// The statuses of a run that has not settled yet: waiting for its turn,
-// starting, executing, or paused at a wait. Every other status is how a run
-// ended.
-const LIVE_RUN_STATUSES = [
-  "PENDING_VERSION",
-  "QUEUED",
-  "DEQUEUED",
-  "EXECUTING",
-  "WAITING",
-  "DELAYED",
-] as const
+// The most runs one liveness check looks up. The canvas shows at most one run
+// going, so this only bounds a caller that is not the canvas: each id costs a
+// request to Trigger.dev.
+const MAX_LIVENESS_LOOKUPS = 5
 
 // The run of this workflow still going, if there is one. Under the workflow's
 // run lock the executions table is where to look: the Run that held the lock
@@ -58,9 +53,8 @@ async function findLiveRun(orgId: string, workflowId: string) {
   if (!execution) return undefined
 
   const run = await runs.retrieve(execution.runId).catch(() => undefined)
-  const statuses: readonly string[] = LIVE_RUN_STATUSES
 
-  return run && statuses.includes(run.status) ? execution.runId : undefined
+  return run && isLiveRunStatus(run.status) ? execution.runId : undefined
 }
 
 export async function createWorkflowAction(name: string) {
@@ -351,4 +345,71 @@ export async function cancelWorkflowRunAction({
   })
 
   Sentry.logger.info("Workflow run cancelled", { orgId, workflowId, runId })
+}
+
+// Which of these runs are still going, as Trigger.dev sees them now. The canvas
+// asks while it shows a run as going: its realtime subscription can go silent
+// without an error, and this is how it finds out a run ended long ago.
+export async function getLiveRunIdsAction({
+  workflowId,
+  runIds,
+}: {
+  workflowId: string
+  runIds: string[]
+}): Promise<string[]> {
+  const { orgId } = await auth()
+  if (!orgId) throw new Error("No active organization")
+
+  Sentry.getIsolationScope().setAttributes({
+    action: "getLiveRunIdsAction",
+    orgId,
+    workflowId,
+  })
+
+  // The same two hops as cancelling: the workflow has to be this org's, and
+  // each run that workflow's. The answer is only ever a subset of the ids sent,
+  // so a run that fails the second hop just drops out of it.
+  const workflow = await getWorkflow(orgId, workflowId)
+  if (!workflow) throw new Error("Workflow not found")
+
+  const stillLive = await Promise.all(
+    runIds.slice(0, MAX_LIVENESS_LOOKUPS).map(async (runId) => {
+      const run = await runs.retrieve(runId).catch(() => undefined)
+
+      // Not known to have ended is not ended: answering that would have the
+      // canvas resubscribe for nothing. It gives nothing away either, since
+      // the id is the caller's own.
+      if (!run) return runId
+
+      return isRunOfWorkflow(run, workflowId) && isLiveRunStatus(run.status)
+        ? runId
+        : undefined
+    })
+  )
+
+  return stillLive.filter((runId) => runId !== undefined)
+}
+
+// A fresh token for a canvas's realtime subscription, which asks for one when
+// Trigger.dev turns down the one it holds (they last an hour). Only for this
+// org's workflows, so a browser cannot mint itself a way into another org's
+// runs.
+export async function createRunsTokenAction(workflowId: string) {
+  const { orgId } = await auth()
+  if (!orgId) throw new Error("No active organization")
+
+  Sentry.getIsolationScope().setAttributes({
+    action: "createRunsTokenAction",
+    orgId,
+    workflowId,
+  })
+
+  const workflow = await getWorkflow(orgId, workflowId)
+  if (!workflow) throw new Error("Workflow not found")
+
+  const token = await createRunsReadToken(workflowId)
+
+  Sentry.logger.info("Realtime runs token refreshed", { orgId, workflowId })
+
+  return token
 }
