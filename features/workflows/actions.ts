@@ -3,34 +3,25 @@
 import * as Sentry from "@sentry/nextjs"
 import { auth } from "@clerk/nextjs/server"
 import { LiveblocksError } from "@liveblocks/node"
-import { tasks, runs } from "@trigger.dev/sdk"
+import { runs } from "@trigger.dev/sdk"
 import { revalidatePath } from "next/cache"
 import { redirect } from "next/navigation"
-
-import type { runWorkflowTask } from "@/features/workflows/tasks/run-workflow"
 
 import {
   advanceExecution,
   createWorkflow,
   deleteWorkflow,
-  getLatestUnsettledExecution,
   getWorkflow,
   publishWorkflowVersion,
-  recordExecution,
-  withWorkflowRunLock,
 } from "@/features/workflows/data"
 import {
   planRequiredMessage,
   premiumNodeLabels,
 } from "@/features/workflows/lib/premium-gate"
 import { isLiveRunStatus } from "@/features/workflows/lib/run-liveness"
-import { runQueueFor } from "@/features/workflows/lib/run-queues"
-import {
-  isRunOfWorkflow,
-  RUN_WORKFLOW_TASK_ID,
-  workflowRunTag,
-} from "@/features/workflows/lib/run-ownership"
+import { isRunOfWorkflow } from "@/features/workflows/lib/run-ownership"
 import { createRunsReadToken } from "@/features/workflows/lib/runs-token"
+import { startWorkflowRun } from "@/features/workflows/start-run"
 import { PRO_PLAN, PlanRequiredError } from "@/lib/billing"
 import { getLiveblocks } from "@/lib/liveblocks"
 import { WorkflowGraph } from "@/lib/db/schema"
@@ -39,23 +30,6 @@ import { WorkflowGraph } from "@/lib/db/schema"
 // going, so this only bounds a caller that is not the canvas: each id costs a
 // request to Trigger.dev.
 const MAX_LIVENESS_LOOKUPS = 5
-
-// The run of this workflow still going, if there is one. Under the workflow's
-// run lock the executions table is where to look: the Run that held the lock
-// before this one recorded its run there before letting go, while Trigger.dev's
-// run list makes no promise to show a run the moment it is triggered. The row
-// is not the whole answer, though: a run that crashed without a hook leaves it
-// unsettled, so Trigger.dev confirms the run by id. A run it cannot find (the
-// database is shared with another environment, or the run is gone) is not one
-// going here.
-async function findLiveRun(orgId: string, workflowId: string) {
-  const execution = await getLatestUnsettledExecution(orgId, workflowId)
-  if (!execution) return undefined
-
-  const run = await runs.retrieve(execution.runId).catch(() => undefined)
-
-  return run && isLiveRunStatus(run.status) ? execution.runId : undefined
-}
 
 export async function createWorkflowAction(name: string) {
   const { orgId } = await auth()
@@ -212,82 +186,63 @@ export async function runWorkflowAction({
     throw new Error("Workflow not found")
   }
 
-  // At most one run going per workflow. The canvas assumes it (Run turns into
-  // Stop, and Stop reaches a single run), so a second Run hands back the run
-  // already going instead of starting another. Everything from the check to
-  // the recorded execution happens under the workflow's run lock: without it,
-  // two Runs a second apart both found no run and both started one.
-  return withWorkflowRunLock(id, async () => {
-    const liveRunId = await findLiveRun(orgId, id)
-
-    if (liveRunId) {
-      Sentry.logger.info("Workflow run already going", {
-        orgId,
-        workflowId: id,
-        runId: liveRunId,
-      })
-      return { id: liveRunId }
-    }
-
+  // A second Run while one is going hands back that run instead of starting
+  // another (see startWorkflowRun).
+  const started = await startWorkflowRun({
+    orgId,
+    workflowId: id,
+    isPro,
     // The graph in hand becomes an immutable version, and the run gets that
     // version rather than the workflow: the task reads exactly this graph, even
-    // if someone else hits Run before the worker gets to it. publishing re-runs
+    // if someone else hits Run before the worker gets to it. Publishing re-runs
     // validateGraph as the backstop, so this is also where a graph the client
     // let through gets rejected.
-    const version = await publishWorkflowVersion({
-      orgId,
-      workflowId: id,
-      graph,
-    }).catch((error: unknown) => {
-      Sentry.logger.warn("Workflow run blocked — version not published", {
-        orgId,
-        workflowId: id,
-        reason: error instanceof Error ? error.message : String(error),
-      })
-      throw error
-    })
-
-    // On its plan's queue, in that queue's copy for this org: one org's runs
-    // cannot take every slot, and a run past the plan's limit waits as queued
-    // instead of failing.
-    const placement = runQueueFor({ orgId, isPro })
-
-    const handle = await tasks.trigger<typeof runWorkflowTask>(
-      RUN_WORKFLOW_TASK_ID,
-      { workflowId: id, orgId, versionId: version.id },
-      { tags: [workflowRunTag(id)], ...placement }
-    )
-
-    // The run's durable record, as queued. Not worth failing the Run button
-    // over: the run is already in Trigger.dev, and the worker writes the row
-    // itself when the run starts. Reported, since the row is then late.
-    await recordExecution({
-      runId: handle.id,
-      orgId,
-      workflowId: id,
-      versionId: version.id,
-    }).catch((error: unknown) => {
-      Sentry.captureException(error, {
-        tags: { area: "executions" },
-        extra: { orgId, workflowId: id, runId: handle.id },
-      })
-    })
-
-    // One wide event rather than a start/end pair: everything worth correlating
-    // about this run is knowable here, and the run's own progress is already
-    // traced in Trigger.dev under this same id.
-    Sentry.logger.info("Workflow run started", {
-      orgId,
-      workflowId: id,
-      versionId: version.id,
-      runId: handle.id,
-      queue: placement.queue,
-      nodeCount: graph.nodes.length,
-      edgeCount: graph.edges.length,
-    })
-
-    return handle
+    version: () =>
+      publishWorkflowVersion({ orgId, workflowId: id, graph }).catch(
+        (error: unknown) => {
+          Sentry.logger.warn("Workflow run blocked — version not published", {
+            orgId,
+            workflowId: id,
+            reason: error instanceof Error ? error.message : String(error),
+          })
+          throw error
+        }
+      ),
   })
+
+  if (started.alreadyGoing) {
+    Sentry.logger.info("Workflow run already going", {
+      orgId,
+      workflowId: id,
+      runId: started.runId,
+    })
+    return { id: started.runId }
+  }
+
+  // Not worth failing the Run button over: the run is already in Trigger.dev,
+  // and the worker writes the row itself when the run starts. Reported, since
+  // the row is then late.
+  if (started.recordError !== undefined) {
+    Sentry.captureException(started.recordError, {
+      tags: { area: "executions" },
+      extra: { orgId, workflowId: id, runId: started.runId },
+    })
+  }
+
+  // One wide event rather than a start/end pair: everything worth correlating
+  // about this run is knowable here, and the run's own progress is already
+  // traced in Trigger.dev under this same id.
+  Sentry.logger.info("Workflow run started", {
+    orgId,
+    workflowId: id,
+    versionId: started.versionId,
+    runId: started.runId,
+    queue: started.queue,
+    nodeCount: graph.nodes.length,
+    edgeCount: graph.edges.length,
+  })
+
+  return { id: started.runId }
 }
 
 export async function cancelWorkflowRunAction({
