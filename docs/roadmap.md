@@ -72,7 +72,10 @@ As decisões ficam em [`docs/adr/`](adr/).
       e Send Email, que envia com `idempotencyKey` = `runId:nodeId`. Tempo limite por tipo de nó; o
       passo que estoura falha sem repetir. `AbortTaskRunError` ficou de fora, porque a task tem uma
       tentativa só ([ADR 0007](adr/0007-retry-por-passo.md))
-- [ ] **C.4** Testes de falha (browser fake que falha N vezes) e de dois Runs simultâneos
+- [x] **C.4** Testes de falha e de concorrência. O motor tem o navegador que falha em toda
+      tentativa menos a última e chega lá, além dos casos da C.3. A action tem dois Runs ao mesmo
+      tempo, com a trava e a tabela de execuções em memória: com a trava, uma run só e a mesma para
+      os dois; sem ela, duas runs, o que prova que o teste consegue falhar
 - [x] **C.5** Reconciliar execuções presas em `running` (runs que travaram sem acionar hook): a task
       agendada `reconcile-executions` confere a cada 15 minutos, no Trigger.dev, as execuções sem fim
       registrado há mais de 10 minutos, e grava como a run terminou. Deixa em paz a run ainda ativa e

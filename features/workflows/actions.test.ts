@@ -162,6 +162,101 @@ describe("runWorkflowAction", () => {
       expect(publishWorkflowVersion).not.toHaveBeenCalled()
       expect(triggerTask).not.toHaveBeenCalled()
     })
+
+    // Two Runs at once, through the whole action. The lock and the executions
+    // table are held in memory, and every call to a service yields, so the
+    // two interleave the way two requests landing together do.
+    describe("two Runs at the same time", () => {
+      // The executions table, as the action writes and reads it.
+      let executions: { runId: string; workflowId: string }[]
+
+      // Lets the other Run go ahead, as a round trip to a service would.
+      const yieldToTheOtherRun = () =>
+        new Promise((resolve) => setTimeout(resolve, 0))
+
+      // Makes the second caller wait until the first is done, like Postgres's
+      // advisory lock does.
+      function memoryLock() {
+        let tail = Promise.resolve()
+
+        return async (_workflowId: string, fn: () => Promise<unknown>) => {
+          const previous = tail
+          let release!: () => void
+          tail = new Promise((resolve) => {
+            release = resolve
+          })
+
+          await previous
+          try {
+            return await fn()
+          } finally {
+            release()
+          }
+        }
+      }
+
+      const runTwice = () =>
+        Promise.all([
+          runWorkflowAction({ id: "wf_1", graph }),
+          runWorkflowAction({ id: "wf_1", graph }),
+        ])
+
+      beforeEach(() => {
+        executions = []
+        let runs = 0
+
+        getLatestUnsettledExecution.mockImplementation(
+          async (_orgId: string, workflowId: string) => {
+            await yieldToTheOtherRun()
+            return executions.filter((e) => e.workflowId === workflowId).at(-1)
+          }
+        )
+        retrieveRun.mockResolvedValue({ status: "EXECUTING" })
+        publishWorkflowVersion.mockImplementation(async () => {
+          await yieldToTheOtherRun()
+          return { id: "ver_1" }
+        })
+        triggerTask.mockImplementation(async () => {
+          await yieldToTheOtherRun()
+          return { id: `run_${++runs}` }
+        })
+        recordExecution.mockImplementation(
+          async ({
+            runId,
+            workflowId,
+          }: {
+            runId: string
+            workflowId: string
+          }) => {
+            await yieldToTheOtherRun()
+            executions.push({ runId, workflowId })
+          }
+        )
+      })
+
+      it("starts one run and hands both Runs that same run", async () => {
+        withWorkflowRunLock.mockImplementation(memoryLock())
+
+        const [first, second] = await runTwice()
+
+        expect(triggerTask).toHaveBeenCalledTimes(1)
+        expect(first).toEqual({ id: "run_1" })
+        expect(second).toEqual({ id: "run_1" })
+      })
+
+      // What the two-tab test saw before C.2. Kept so the test above is known
+      // to fail when the lock is gone, not just to pass when it is there.
+      it("starts two runs when nothing serializes them", async () => {
+        withWorkflowRunLock.mockImplementation(
+          async (_workflowId: string, fn: () => Promise<unknown>) => fn()
+        )
+
+        const [first, second] = await runTwice()
+
+        expect(triggerTask).toHaveBeenCalledTimes(2)
+        expect(first).not.toEqual(second)
+      })
+    })
   })
 
   it("publishes the graph as a version and runs exactly that version", async () => {
