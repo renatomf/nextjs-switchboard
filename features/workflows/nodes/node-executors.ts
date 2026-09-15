@@ -14,6 +14,9 @@ import { sendEmail } from "./send-email"
 type NodeContext = {
   values: Record<string, string>
   getStagehand: () => Promise<Stagehand>
+  // Unique to this step of this run, and the same for every attempt of it:
+  // what a node hands a service that could otherwise do its work twice.
+  idempotencyKey: string
 }
 
 export type NodeExecutor = (ctx: NodeContext) => Promise<unknown>
@@ -36,6 +39,11 @@ export const nodeExecutors: Partial<Record<NodeType, NodeExecutor>> = {
   agent: async ({ values, getStagehand }) =>
     agent({ stagehand: await getStagehand(), instruction: values.instruction }),
   // No getStagehand call, so this step runs without opening a browser session.
-  "send-email": async ({ values }) =>
-    sendEmail({ to: values.to, subject: values.subject, body: values.body }),
+  "send-email": async ({ values, idempotencyKey }) =>
+    sendEmail({
+      to: values.to,
+      subject: values.subject,
+      body: values.body,
+      idempotencyKey,
+    }),
 } satisfies Record<ActionNodeType, NodeExecutor>

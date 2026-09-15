@@ -13,6 +13,7 @@ import {
 import { resolveModel } from "@/features/workflows/lib/model-config"
 import { RUN_QUEUES } from "@/features/workflows/lib/run-queues"
 import { nodeExecutors } from "@/features/workflows/nodes/node-executors"
+import { stepPolicies } from "@/features/workflows/nodes/step-policies"
 import { createBrowserSession } from "@/features/workflows/tasks/browser-session"
 import {
   loadRunGraph,
@@ -65,6 +66,9 @@ export const runWorkflowTask = task({
   // times over — three sessions, three times the model calls. The failures that
   // actually happen here (a bad instruction, a retired model, an exhausted quota)
   // are not the kind a retry fixes. One attempt, and the run reports what broke.
+  // The failures a retry does fix, a dropped connection or an overloaded
+  // service, are retried per step inside the run instead, in the same session
+  // (see step-policies).
   retry: { maxAttempts: 1 },
   // The tighter of the two plan queues, for a run triggered without one, such
   // as by an app deployed before the queues existed. The action always names
@@ -153,8 +157,10 @@ export const runWorkflowTask = task({
     const browser = createBrowserSession({ open: openStagehand, signal })
 
     const { steps, outputs } = await runSteps({
+      runId: ctx.run.id,
       graph,
       executors: nodeExecutors,
+      policies: stepPolicies,
       browser,
       progress: metadataReporter,
       logger,

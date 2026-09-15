@@ -11,6 +11,8 @@ import {
 describe("nextStepStatus", () => {
   it.each<[StepStatus, StepEvent, StepStatus]>([
     ["pending", "started", "running"],
+    // A failed attempt that earns another keeps the step running.
+    ["running", "retried", "running"],
     ["running", "succeeded", "done"],
     ["running", "failed", "failed"],
     ["running", "cancelled", "cancelled"],
@@ -58,6 +60,7 @@ describe("nextStepStatus", () => {
         "pending + started",
         "running + cancelled",
         "running + failed",
+        "running + retried",
         "running + succeeded",
         "skipped + passed",
       ].sort()

@@ -19,13 +19,16 @@ The retrieval needs the secret API key, so it must be proxied server-side.
 
 # Adding a workflow node
 
-Three edits, all under `features/workflows/nodes/`:
+Four edits, all under `features/workflows/nodes/`:
 
 1. the impl file (e.g. `open-url.ts`) — the node's executor logic,
 2. register it in `node-executors.ts` — the `satisfies` contract makes a missing
    executor a compile error for action nodes,
 3. add its manifest entry in `node-registry.ts` — kind, label, icon, accent, its
-   input `fields`, and the `outputs` downstream nodes can reference.
+   input `fields`, and the `outputs` downstream nodes can reference,
+4. give it a policy in `step-policies.ts` — the time one attempt gets and how many
+   attempts it has. Only a node that can safely do its work twice gets more than
+   one. Same `satisfies` contract as the executors.
 
 The run task and the canvas step node are registry-driven — never touch them to add
 a node.
