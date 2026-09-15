@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, sql } from "drizzle-orm"
+import { and, desc, eq, inArray, lt, sql } from "drizzle-orm"
 
 import { getDb } from "@/lib/db"
 import {
@@ -154,6 +154,34 @@ export async function getLatestUnsettledExecution(
     .limit(1)
 
   return execution
+}
+
+// Executions not settled yet that were created before a point in time, newest
+// first. What the reconciliation checks against Trigger.dev. Across every org:
+// it is the system looking after its own records, not a request from one.
+export function listUnsettledExecutions({
+  createdBefore,
+  limit,
+}: {
+  createdBefore: Date
+  limit: number
+}) {
+  return getDb()
+    .select({
+      runId: executions.runId,
+      orgId: executions.orgId,
+      workflowId: executions.workflowId,
+      versionId: executions.versionId,
+    })
+    .from(executions)
+    .where(
+      and(
+        inArray(executions.status, ["queued", "running"]),
+        lt(executions.createdAt, createdBefore)
+      )
+    )
+    .orderBy(desc(executions.createdAt))
+    .limit(limit)
 }
 
 export async function setExecutionBrowserSession(

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import {
   allowedFrom,
+  endingForRunStatus,
   EXECUTION_STATUSES,
   isTerminal,
   nextStatus,
@@ -45,6 +46,44 @@ describe("nextStatus", () => {
       for (const event of EVENTS) expect(nextStatus(status, event)).toBeNull()
     }
   )
+})
+
+// How a run Trigger.dev reports as over ended, as the execution records it.
+// The reconciliation reads this for runs whose own hooks never wrote it.
+describe("endingForRunStatus", () => {
+  it("records a completed run as succeeded", () => {
+    expect(endingForRunStatus("COMPLETED")).toBe("succeeded")
+  })
+
+  it("records a cancelled run as cancelled", () => {
+    expect(endingForRunStatus("CANCELED")).toBe("cancelled")
+  })
+
+  // Every way a run can break, including the ones no hook reports: a worker
+  // that crashed, a platform failure, a run that expired in the queue.
+  it.each(["FAILED", "CRASHED", "SYSTEM_FAILURE", "EXPIRED", "TIMED_OUT"])(
+    "records a %s run as failed",
+    (status) => {
+      expect(endingForRunStatus(status)).toBe("failed")
+    }
+  )
+
+  it.each([
+    "PENDING_VERSION",
+    "QUEUED",
+    "DEQUEUED",
+    "EXECUTING",
+    "WAITING",
+    "DELAYED",
+  ])("has no ending for a %s run, which is still going", (status) => {
+    expect(endingForRunStatus(status)).toBeNull()
+  })
+
+  // A status added to Trigger.dev after this was written: better left alone
+  // than recorded as an ending it may not be.
+  it("has no ending for a status it does not know", () => {
+    expect(endingForRunStatus("REATTEMPTING")).toBeNull()
+  })
 })
 
 describe("isTerminal", () => {

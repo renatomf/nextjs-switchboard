@@ -58,6 +58,8 @@ o app terminar de gravar**.
 - ✅ Há um histórico durável de execuções, a base para métricas, quotas por organização e custo.
 - ⚠️ **Uma run que trava sem hook nenhum fica como `running`.** A solução completa é uma
   reconciliação com a API do Trigger.dev (uma task agendada, por exemplo), registrada no roadmap.
+  _Resolvido na C.5:_ a task `reconcile-executions` confere a cada 15 minutos as execuções sem fim
+  registrado e grava como a run terminou.
 - ⚠️ **Replays de runs anteriores a esta tabela passam a responder 404**, porque não existe registro
   de quem é o dono delas.
 - ⚠️ A tabela ganha uma linha por run e ainda não tem política de retenção.
