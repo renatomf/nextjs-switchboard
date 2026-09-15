@@ -1,6 +1,7 @@
 import type { Edge } from "@xyflow/react"
 import { sql } from "drizzle-orm"
 import {
+  boolean,
   check,
   index,
   jsonb,
@@ -18,6 +19,7 @@ import {
   EXECUTION_STATUSES,
   type ExecutionStatus,
 } from "../../features/workflows/lib/execution-status"
+import type { SchedulePreset } from "@/features/workflows/lib/schedule-presets"
 import type { StepNodeType } from "@/features/workflows/nodes/node-registry"
 
 // Canonical, server-readable snapshot of the flow. Mirrors React Flow's own
@@ -129,3 +131,48 @@ export const executions = pgTable(
     ),
   ]
 )
+
+// When Trigger.dev runs a workflow on its own. The schedule itself lives on
+// Trigger.dev; this row is what the app knows of it: which workflow and org it
+// belongs to, and the preset it was made from.
+export const workflowSchedules = pgTable(
+  "workflow_schedules",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workflowId: uuid("workflow_id")
+      .notNull()
+      .references(() => workflows.id, { onDelete: "cascade" }),
+    orgId: text("org_id").notNull(),
+    // The Trigger.dev environment the schedule lives in ("dev", "prod").
+    // Development and production share this database, so the same workflow can
+    // have a schedule in each.
+    environment: text("environment").notNull(),
+    preset: jsonb("preset").$type<SchedulePreset>().notNull(),
+    timezone: text("timezone").notNull(),
+    // The schedule's id on Trigger.dev, for updating or removing it.
+    triggerScheduleId: text("trigger_schedule_id").notNull(),
+    // Off once the org is no longer on a plan that includes schedules: the
+    // run that finds this turns the schedule off on Trigger.dev as well.
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamptz("created_at").defaultNow().notNull(),
+    updatedAt: timestamptz("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    // One schedule per workflow in each environment.
+    uniqueIndex("workflow_schedules_workflow_id_environment_idx").on(
+      table.workflowId,
+      table.environment
+    ),
+    // A scheduled run finds its schedule by the id Trigger.dev hands it.
+    uniqueIndex("workflow_schedules_trigger_schedule_id_idx").on(
+      table.triggerScheduleId
+    ),
+    // Counting an org's schedules, against its share of the project's.
+    index("workflow_schedules_org_id_environment_idx").on(
+      table.orgId,
+      table.environment
+    ),
+  ]
+)
+
+export type WorkflowSchedule = typeof workflowSchedules.$inferSelect

@@ -1,11 +1,13 @@
-import { and, desc, eq, inArray, lt, sql } from "drizzle-orm"
+import { and, count, desc, eq, inArray, lt, sql } from "drizzle-orm"
 
 import { getDb } from "@/lib/db"
 import {
   executions,
   workflows,
+  workflowSchedules,
   workflowVersions,
   WorkflowGraph,
+  type WorkflowSchedule,
 } from "@/lib/db/schema"
 import {
   allowedFrom,
@@ -211,6 +213,135 @@ export async function getExecutionBySession(
     )
 
   return execution
+}
+
+// The schedule a workflow has in this Trigger.dev environment, if the workflow
+// is this org's.
+export async function getWorkflowSchedule(
+  orgId: string,
+  workflowId: string,
+  environment: string
+) {
+  const [schedule] = await getDb()
+    .select()
+    .from(workflowSchedules)
+    .where(
+      and(
+        eq(workflowSchedules.orgId, orgId),
+        eq(workflowSchedules.workflowId, workflowId),
+        eq(workflowSchedules.environment, environment)
+      )
+    )
+
+  return schedule
+}
+
+// How many schedules an org has in this environment, counted against its share
+// of the project's.
+export async function countOrgSchedules(orgId: string, environment: string) {
+  const [{ value }] = await getDb()
+    .select({ value: count() })
+    .from(workflowSchedules)
+    .where(
+      and(
+        eq(workflowSchedules.orgId, orgId),
+        eq(workflowSchedules.environment, environment)
+      )
+    )
+
+  return value
+}
+
+// Records a workflow's schedule, replacing the one it had in this
+// environment. The caller has already checked the workflow is the org's.
+export async function saveWorkflowSchedule(
+  schedule: Pick<
+    WorkflowSchedule,
+    | "orgId"
+    | "workflowId"
+    | "environment"
+    | "preset"
+    | "timezone"
+    | "triggerScheduleId"
+  >
+) {
+  const [saved] = await getDb()
+    .insert(workflowSchedules)
+    .values(schedule)
+    .onConflictDoUpdate({
+      target: [workflowSchedules.workflowId, workflowSchedules.environment],
+      set: {
+        preset: schedule.preset,
+        timezone: schedule.timezone,
+        triggerScheduleId: schedule.triggerScheduleId,
+        active: true,
+        updatedAt: new Date(),
+      },
+    })
+    .returning()
+
+  return saved
+}
+
+// Removes a workflow's schedule in this environment, if the workflow is this
+// org's, and hands back what was removed.
+export async function deleteWorkflowSchedule(
+  orgId: string,
+  workflowId: string,
+  environment: string
+) {
+  const [removed] = await getDb()
+    .delete(workflowSchedules)
+    .where(
+      and(
+        eq(workflowSchedules.orgId, orgId),
+        eq(workflowSchedules.workflowId, workflowId),
+        eq(workflowSchedules.environment, environment)
+      )
+    )
+    .returning()
+
+  return removed
+}
+
+// The schedule a scheduled run was started by, found by the id Trigger.dev
+// hands the run. Not scoped by org: the run comes from Trigger.dev, not from a
+// person, and the org is what it finds out here.
+export async function getScheduleForRun(triggerScheduleId: string) {
+  const [schedule] = await getDb()
+    .select()
+    .from(workflowSchedules)
+    .where(eq(workflowSchedules.triggerScheduleId, triggerScheduleId))
+
+  return schedule
+}
+
+// Marks a schedule off, once Trigger.dev has been told to stop running it.
+export async function deactivateWorkflowSchedule(triggerScheduleId: string) {
+  await getDb()
+    .update(workflowSchedules)
+    .set({ active: false, updatedAt: new Date() })
+    .where(eq(workflowSchedules.triggerScheduleId, triggerScheduleId))
+}
+
+// The workflow's newest version: what a scheduled run executes.
+export async function getLatestWorkflowVersion(
+  orgId: string,
+  workflowId: string
+) {
+  const [version] = await getDb()
+    .select()
+    .from(workflowVersions)
+    .where(
+      and(
+        eq(workflowVersions.orgId, orgId),
+        eq(workflowVersions.workflowId, workflowId)
+      )
+    )
+    .orderBy(desc(workflowVersions.createdAt))
+    .limit(1)
+
+  return version
 }
 
 export function listWorkflows(orgId: string) {

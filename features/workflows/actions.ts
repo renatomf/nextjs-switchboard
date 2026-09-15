@@ -3,59 +3,45 @@
 import * as Sentry from "@sentry/nextjs"
 import { auth } from "@clerk/nextjs/server"
 import { LiveblocksError } from "@liveblocks/node"
-import { tasks, runs } from "@trigger.dev/sdk"
+import { runs, schedules } from "@trigger.dev/sdk"
 import { revalidatePath } from "next/cache"
 import { redirect } from "next/navigation"
 
-import type { runWorkflowTask } from "@/features/workflows/tasks/run-workflow"
-
 import {
   advanceExecution,
+  countOrgSchedules,
   createWorkflow,
   deleteWorkflow,
-  getLatestUnsettledExecution,
+  deleteWorkflowSchedule,
   getWorkflow,
+  getWorkflowSchedule,
   publishWorkflowVersion,
-  recordExecution,
-  withWorkflowRunLock,
+  saveWorkflowSchedule,
 } from "@/features/workflows/data"
 import {
   planRequiredMessage,
   premiumNodeLabels,
 } from "@/features/workflows/lib/premium-gate"
 import { isLiveRunStatus } from "@/features/workflows/lib/run-liveness"
-import { runQueueFor } from "@/features/workflows/lib/run-queues"
-import {
-  isRunOfWorkflow,
-  RUN_WORKFLOW_TASK_ID,
-  workflowRunTag,
-} from "@/features/workflows/lib/run-ownership"
+import { isRunOfWorkflow } from "@/features/workflows/lib/run-ownership"
 import { createRunsReadToken } from "@/features/workflows/lib/runs-token"
+import {
+  cronFor,
+  MAX_SCHEDULES_PER_ORG,
+  parseScheduleInput,
+  SCHEDULED_WORKFLOW_TASK_ID,
+  scheduleDeduplicationKey,
+} from "@/features/workflows/lib/schedule-presets"
+import { triggerEnvironmentOf } from "@/features/workflows/lib/trigger-environment"
+import { startWorkflowRun } from "@/features/workflows/start-run"
 import { PRO_PLAN, PlanRequiredError } from "@/lib/billing"
 import { getLiveblocks } from "@/lib/liveblocks"
-import { WorkflowGraph } from "@/lib/db/schema"
+import { WorkflowGraph, type WorkflowSchedule } from "@/lib/db/schema"
 
 // The most runs one liveness check looks up. The canvas shows at most one run
 // going, so this only bounds a caller that is not the canvas: each id costs a
 // request to Trigger.dev.
 const MAX_LIVENESS_LOOKUPS = 5
-
-// The run of this workflow still going, if there is one. Under the workflow's
-// run lock the executions table is where to look: the Run that held the lock
-// before this one recorded its run there before letting go, while Trigger.dev's
-// run list makes no promise to show a run the moment it is triggered. The row
-// is not the whole answer, though: a run that crashed without a hook leaves it
-// unsettled, so Trigger.dev confirms the run by id. A run it cannot find (the
-// database is shared with another environment, or the run is gone) is not one
-// going here.
-async function findLiveRun(orgId: string, workflowId: string) {
-  const execution = await getLatestUnsettledExecution(orgId, workflowId)
-  if (!execution) return undefined
-
-  const run = await runs.retrieve(execution.runId).catch(() => undefined)
-
-  return run && isLiveRunStatus(run.status) ? execution.runId : undefined
-}
 
 export async function createWorkflowAction(name: string) {
   const { orgId } = await auth()
@@ -212,82 +198,63 @@ export async function runWorkflowAction({
     throw new Error("Workflow not found")
   }
 
-  // At most one run going per workflow. The canvas assumes it (Run turns into
-  // Stop, and Stop reaches a single run), so a second Run hands back the run
-  // already going instead of starting another. Everything from the check to
-  // the recorded execution happens under the workflow's run lock: without it,
-  // two Runs a second apart both found no run and both started one.
-  return withWorkflowRunLock(id, async () => {
-    const liveRunId = await findLiveRun(orgId, id)
-
-    if (liveRunId) {
-      Sentry.logger.info("Workflow run already going", {
-        orgId,
-        workflowId: id,
-        runId: liveRunId,
-      })
-      return { id: liveRunId }
-    }
-
+  // A second Run while one is going hands back that run instead of starting
+  // another (see startWorkflowRun).
+  const started = await startWorkflowRun({
+    orgId,
+    workflowId: id,
+    isPro,
     // The graph in hand becomes an immutable version, and the run gets that
     // version rather than the workflow: the task reads exactly this graph, even
-    // if someone else hits Run before the worker gets to it. publishing re-runs
+    // if someone else hits Run before the worker gets to it. Publishing re-runs
     // validateGraph as the backstop, so this is also where a graph the client
     // let through gets rejected.
-    const version = await publishWorkflowVersion({
-      orgId,
-      workflowId: id,
-      graph,
-    }).catch((error: unknown) => {
-      Sentry.logger.warn("Workflow run blocked — version not published", {
-        orgId,
-        workflowId: id,
-        reason: error instanceof Error ? error.message : String(error),
-      })
-      throw error
-    })
-
-    // On its plan's queue, in that queue's copy for this org: one org's runs
-    // cannot take every slot, and a run past the plan's limit waits as queued
-    // instead of failing.
-    const placement = runQueueFor({ orgId, isPro })
-
-    const handle = await tasks.trigger<typeof runWorkflowTask>(
-      RUN_WORKFLOW_TASK_ID,
-      { workflowId: id, orgId, versionId: version.id },
-      { tags: [workflowRunTag(id)], ...placement }
-    )
-
-    // The run's durable record, as queued. Not worth failing the Run button
-    // over: the run is already in Trigger.dev, and the worker writes the row
-    // itself when the run starts. Reported, since the row is then late.
-    await recordExecution({
-      runId: handle.id,
-      orgId,
-      workflowId: id,
-      versionId: version.id,
-    }).catch((error: unknown) => {
-      Sentry.captureException(error, {
-        tags: { area: "executions" },
-        extra: { orgId, workflowId: id, runId: handle.id },
-      })
-    })
-
-    // One wide event rather than a start/end pair: everything worth correlating
-    // about this run is knowable here, and the run's own progress is already
-    // traced in Trigger.dev under this same id.
-    Sentry.logger.info("Workflow run started", {
-      orgId,
-      workflowId: id,
-      versionId: version.id,
-      runId: handle.id,
-      queue: placement.queue,
-      nodeCount: graph.nodes.length,
-      edgeCount: graph.edges.length,
-    })
-
-    return handle
+    version: () =>
+      publishWorkflowVersion({ orgId, workflowId: id, graph }).catch(
+        (error: unknown) => {
+          Sentry.logger.warn("Workflow run blocked — version not published", {
+            orgId,
+            workflowId: id,
+            reason: error instanceof Error ? error.message : String(error),
+          })
+          throw error
+        }
+      ),
   })
+
+  if (started.alreadyGoing) {
+    Sentry.logger.info("Workflow run already going", {
+      orgId,
+      workflowId: id,
+      runId: started.runId,
+    })
+    return { id: started.runId }
+  }
+
+  // Not worth failing the Run button over: the run is already in Trigger.dev,
+  // and the worker writes the row itself when the run starts. Reported, since
+  // the row is then late.
+  if (started.recordError !== undefined) {
+    Sentry.captureException(started.recordError, {
+      tags: { area: "executions" },
+      extra: { orgId, workflowId: id, runId: started.runId },
+    })
+  }
+
+  // One wide event rather than a start/end pair: everything worth correlating
+  // about this run is knowable here, and the run's own progress is already
+  // traced in Trigger.dev under this same id.
+  Sentry.logger.info("Workflow run started", {
+    orgId,
+    workflowId: id,
+    versionId: started.versionId,
+    runId: started.runId,
+    queue: started.queue,
+    nodeCount: graph.nodes.length,
+    edgeCount: graph.edges.length,
+  })
+
+  return { id: started.runId }
 }
 
 export async function cancelWorkflowRunAction({
@@ -412,4 +379,159 @@ export async function createRunsTokenAction(workflowId: string) {
   Sentry.logger.info("Realtime runs token refreshed", { orgId, workflowId })
 
   return token
+}
+
+type SaveScheduleResult =
+  | {
+      ok: true
+      schedule: Pick<WorkflowSchedule, "preset" | "timezone" | "active">
+    }
+  | { ok: false; error: string }
+
+// Puts a workflow on a schedule, or changes the schedule it has. Pro only:
+// every scheduled run costs a browser session and model calls, with no one
+// watching it.
+//
+// A refusal the user can act on (the plan, the schedule, the org's share of
+// schedules) comes back as a result rather than a throw: in production the
+// message of a thrown error does not reach the browser.
+export async function saveWorkflowScheduleAction({
+  workflowId,
+  schedule,
+  graph,
+}: {
+  workflowId: string
+  // From the browser, so checked here before anything uses it.
+  schedule: unknown
+  graph: WorkflowGraph
+}): Promise<SaveScheduleResult> {
+  const { orgId, has } = await auth()
+  if (!orgId) throw new Error("No active organization")
+
+  Sentry.getIsolationScope().setAttributes({
+    action: "saveWorkflowScheduleAction",
+    orgId,
+    workflowId,
+  })
+
+  if (!has({ plan: PRO_PLAN })) {
+    Sentry.logger.warn("Workflow schedule refused — plan", {
+      orgId,
+      workflowId,
+      requiredPlan: PRO_PLAN,
+    })
+    return {
+      ok: false,
+      error:
+        "Scheduled workflows are part of the Pro plan. Upgrade to schedule this workflow.",
+    }
+  }
+
+  const parsed = parseScheduleInput(schedule)
+  if (!parsed.ok) return { ok: false, error: parsed.problem }
+
+  const { preset, timezone } = parsed.schedule
+
+  const workflow = await getWorkflow(orgId, workflowId)
+  if (!workflow) throw new Error("Workflow not found")
+
+  // Development and production share one database, and each has schedules of
+  // its own on Trigger.dev.
+  const environment = triggerEnvironmentOf(process.env.TRIGGER_SECRET_KEY)
+  const existing = await getWorkflowSchedule(orgId, workflowId, environment)
+
+  // The project's Trigger.dev plan allows a handful of schedules in all. A
+  // workflow already scheduled can always change its schedule.
+  if (
+    !existing &&
+    (await countOrgSchedules(orgId, environment)) >= MAX_SCHEDULES_PER_ORG
+  ) {
+    return {
+      ok: false,
+      error: `An organization can have up to ${MAX_SCHEDULES_PER_ORG} scheduled workflows. Remove a schedule to add this one.`,
+    }
+  }
+
+  // The canvas as it is now becomes the version the schedule runs, so the first
+  // scheduled run executes what the user just saw. Publishing re-runs
+  // validateGraph too.
+  await publishWorkflowVersion({ orgId, workflowId, graph })
+
+  const cron = cronFor(preset)
+
+  // Creating with a deduplication key Trigger.dev already has updates that
+  // schedule instead, so this one call both creates and changes it.
+  const created = await schedules.create({
+    task: SCHEDULED_WORKFLOW_TASK_ID,
+    cron,
+    timezone,
+    externalId: workflowId,
+    deduplicationKey: scheduleDeduplicationKey(environment, workflowId),
+  })
+
+  // Turned off by a run that found the org no longer on Pro. Saving it again,
+  // once back on Pro, turns it back on.
+  if (!created.active) await schedules.activate(created.id)
+
+  const saved = await saveWorkflowSchedule({
+    orgId,
+    workflowId,
+    environment,
+    preset,
+    timezone,
+    triggerScheduleId: created.id,
+  })
+
+  Sentry.logger.info("Workflow schedule saved", {
+    orgId,
+    workflowId,
+    environment,
+    cron,
+    timezone,
+  })
+
+  return {
+    ok: true,
+    schedule: { preset: saved.preset, timezone: saved.timezone, active: true },
+  }
+}
+
+// Takes a workflow off its schedule. Open to any plan: an org that left Pro can
+// still turn off what it scheduled while on it.
+export async function deleteWorkflowScheduleAction(workflowId: string) {
+  const { orgId } = await auth()
+  if (!orgId) throw new Error("No active organization")
+
+  Sentry.getIsolationScope().setAttributes({
+    action: "deleteWorkflowScheduleAction",
+    orgId,
+    workflowId,
+  })
+
+  const workflow = await getWorkflow(orgId, workflowId)
+  if (!workflow) throw new Error("Workflow not found")
+
+  const environment = triggerEnvironmentOf(process.env.TRIGGER_SECRET_KEY)
+  const existing = await getWorkflowSchedule(orgId, workflowId, environment)
+  if (!existing) return
+
+  // A schedule already gone on Trigger.dev, removed by hand or by a run that
+  // found no record of it, still has its record removed. Any other failure
+  // keeps the record, since it is what lets a second try remove the schedule.
+  await schedules.del(existing.triggerScheduleId).catch((error: unknown) => {
+    const status =
+      typeof error === "object" && error !== null
+        ? (error as { status?: unknown }).status
+        : undefined
+
+    if (status !== 404) throw error
+  })
+
+  await deleteWorkflowSchedule(orgId, workflowId, environment)
+
+  Sentry.logger.info("Workflow schedule removed", {
+    orgId,
+    workflowId,
+    environment,
+  })
 }
