@@ -38,8 +38,9 @@ export function isProSubscription(subscription: unknown): boolean {
 
 // Whether an org is on Pro, asked of Clerk's Backend API: a scheduled run has
 // no session to ask has() of. Only a clear answer counts. An org with no
-// subscription is not Pro, and anything else Clerk answers fails, so a hiccup
-// on Clerk's side never turns a paying org's schedule off.
+// subscription is not Pro, and anything else Clerk answers fails, an answer
+// in a shape this does not know included, so a hiccup on Clerk's side never
+// turns a paying org's schedule off.
 export async function fetchOrgIsPro(
   orgId: string,
   {
@@ -65,5 +66,22 @@ export async function fetchOrgIsPro(
     )
   }
 
-  return isProSubscription(await response.json())
+  const answer: unknown = await response.json()
+
+  // The Billing API is experimental on Clerk's side. Should its answer change
+  // shape, reading it as "not Pro" would turn every schedule off at once, so
+  // an answer that is not a subscription fails like any other unclear one.
+  if (!isSubscription(answer)) {
+    throw new Error(
+      "Clerk's answer for the org's subscription is not a subscription"
+    )
+  }
+
+  return isProSubscription(answer)
 }
+
+// Whether an answer has the shape of a subscription at all, whatever its plan.
+const isSubscription = (value: unknown): boolean =>
+  typeof value === "object" &&
+  value !== null &&
+  Array.isArray((value as { subscription_items?: unknown }).subscription_items)

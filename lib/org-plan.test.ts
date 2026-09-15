@@ -104,6 +104,27 @@ describe("fetchOrgIsPro", () => {
     ).resolves.toBe(false)
   })
 
+  it("is not Pro for an org subscribed to another plan", async () => {
+    const fetch = vi.fn(async () =>
+      respond(subscription([{ status: "active", slug: "free_org" }]))
+    )
+
+    await expect(
+      fetchOrgIsPro("org_a", { secretKey: "sk_test_1", fetch })
+    ).resolves.toBe(false)
+  })
+
+  // The Billing API is experimental on Clerk's side. Should its answer change
+  // shape, reading it as "not Pro" would turn every schedule off at once, so
+  // an answer that is not a subscription fails instead.
+  it("fails rather than answer when Clerk's answer is not a subscription", async () => {
+    const fetch = vi.fn(async () => respond({ billing: { plan: "pro" } }))
+
+    await expect(
+      fetchOrgIsPro("org_a", { secretKey: "sk_test_1", fetch })
+    ).rejects.toThrow("not a subscription")
+  })
+
   // Anything short of a clear answer must not turn a paying org's schedule
   // off: it fails, and the next scheduled run asks again.
   it.each([401, 429, 500, 503])(
