@@ -50,6 +50,13 @@
       "when": 1789515754536,
       "tag": "0006_long_ulik",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1789516110186,
+      "tag": "0007_opposite_smiling_tiger",
+      "breakpoints": true
     }
   ]
 }

@@ -3,6 +3,7 @@ import { and, count, desc, eq, inArray, lt, sql } from "drizzle-orm"
 import { getDb } from "@/lib/db"
 import {
   executions,
+  webhookCalls,
   workflows,
   workflowSchedules,
   workflowVersions,
@@ -381,6 +382,23 @@ export async function deleteWorkflowWebhook(orgId: string, workflowId: string) {
         eq(workflowWebhooks.workflowId, workflowId)
       )
     )
+}
+
+// Counts one webhook call for a workflow in its window, and hands back how
+// many that window holds including this one. A single statement: two calls
+// landing together each get their own number, and neither decides from a
+// count it read a moment earlier.
+export async function countWebhookCall(workflowId: string, windowStart: Date) {
+  const [counted] = await getDb()
+    .insert(webhookCalls)
+    .values({ workflowId, windowStart, calls: 1 })
+    .onConflictDoUpdate({
+      target: [webhookCalls.workflowId, webhookCalls.windowStart],
+      set: { calls: sql`${webhookCalls.calls} + 1` },
+    })
+    .returning({ calls: webhookCalls.calls })
+
+  return counted.calls
 }
 
 // Records that a signed request just started a run, for the panel to show

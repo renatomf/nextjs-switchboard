@@ -57,6 +57,7 @@ export async function startWorkflowRun({
   isPro,
   version,
   tags = [],
+  idempotencyKey,
 }: {
   orgId: string
   workflowId: string
@@ -66,6 +67,11 @@ export async function startWorkflowRun({
   version: () => Promise<{ id: string }>
   // Beyond the workflow's own tag, which the canvas subscribes by.
   tags?: string[]
+  // What stops the same outside event from starting two runs: Trigger.dev
+  // hands back the run this key already started instead of starting another.
+  // Only a webhook has one — the Run button and a schedule are each their own
+  // event.
+  idempotencyKey?: string
 }): Promise<StartedRun> {
   return withWorkflowRunLock(workflowId, async () => {
     const liveRunId = await findLiveRun(orgId, workflowId)
@@ -82,7 +88,13 @@ export async function startWorkflowRun({
     const handle = await tasks.trigger<typeof runWorkflowTask>(
       RUN_WORKFLOW_TASK_ID,
       { workflowId, orgId, versionId },
-      { tags: [workflowRunTag(workflowId), ...tags], ...placement }
+      {
+        tags: [workflowRunTag(workflowId), ...tags],
+        ...placement,
+        // Left out entirely when there is none, rather than passed as
+        // undefined: the options are compared as a whole in the tests.
+        ...(idempotencyKey ? { idempotencyKey } : {}),
+      }
     )
 
     // The run's durable record, as queued. Recorded before the lock is let
