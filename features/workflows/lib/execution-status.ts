@@ -56,3 +56,25 @@ export function nextStatus(
 export function statusAfter(event: ExecutionEvent): ExecutionStatus {
   return STATUS_AFTER[event]
 }
+
+type Ending = Exclude<ExecutionEvent, "started">
+
+// How each Trigger.dev status that means a run is over maps to the way its
+// execution ends. A run breaks in more ways than the one onFailure reports:
+// a crashed worker, a platform failure, a run that expired in the queue.
+const ENDING_FOR_RUN_STATUS = new Map<string, Ending>([
+  ["COMPLETED", "succeeded"],
+  ["CANCELED", "cancelled"],
+  ["FAILED", "failed"],
+  ["CRASHED", "failed"],
+  ["SYSTEM_FAILURE", "failed"],
+  ["EXPIRED", "failed"],
+  ["TIMED_OUT", "failed"],
+])
+
+// How a run Trigger.dev reports ended, as its execution records it, or null
+// for a run still going. A status this does not know is left alone too:
+// better no ending than one the run may not have had.
+export function endingForRunStatus(status: string): Ending | null {
+  return ENDING_FOR_RUN_STATUS.get(status) ?? null
+}
