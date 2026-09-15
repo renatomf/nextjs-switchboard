@@ -13,9 +13,10 @@ const KEY_BY_PROVIDER: Record<string, string> = {
 // where the worker runs next to them, which is `trigger dev`, not a deploy.
 const LOCAL_PROVIDERS = new Set(["ollama"])
 
-// Gemini, on a key of the org's own. It is one of the models Stagehand's agent
-// lists; a keyless Gemini is what failed every agent step from 2026-09-08.
-export const DEFAULT_MODEL = "google/gemini-3.5-flash"
+// Claude: the model the Agent last completed runs with, end to end. Gemini is
+// one STAGEHAND_MODEL away; when it was tried, gemini-3.5-flash was overloaded
+// ("This model is currently experiencing high demand").
+export const DEFAULT_MODEL = "anthropic/claude-opus-4-8"
 
 export function resolveModel(env: Record<string, string | undefined>) {
   const modelName = env.STAGEHAND_MODEL || DEFAULT_MODEL

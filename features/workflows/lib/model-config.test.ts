@@ -3,29 +3,29 @@ import { describe, expect, it } from "vitest"
 import { DEFAULT_MODEL, resolveModel } from "./model-config"
 
 describe("resolveModel", () => {
-  it("runs Gemini with GEMINI_API_KEY when no model is set", () => {
-    expect(resolveModel({ GEMINI_API_KEY: "g-key" })).toEqual({
-      model: { modelName: DEFAULT_MODEL, apiKey: "g-key" },
+  it("runs Claude with CLAUDE_API_KEY when no model is set", () => {
+    expect(resolveModel({ CLAUDE_API_KEY: "c-key" })).toEqual({
+      model: { modelName: DEFAULT_MODEL, apiKey: "c-key" },
       disableAPI: false,
     })
-    expect(DEFAULT_MODEL).toMatch(/^google\//)
+    expect(DEFAULT_MODEL).toMatch(/^anthropic\//)
   })
 
   it("treats an empty STAGEHAND_MODEL as unset", () => {
     expect(
-      resolveModel({ STAGEHAND_MODEL: "", GEMINI_API_KEY: "g-key" })
+      resolveModel({ STAGEHAND_MODEL: "", CLAUDE_API_KEY: "c-key" })
     ).toMatchObject({ model: { modelName: DEFAULT_MODEL } })
   })
 
-  it("hands an Anthropic model the Claude key", () => {
+  it("hands a Gemini model the Gemini key", () => {
     expect(
       resolveModel({
-        STAGEHAND_MODEL: "anthropic/claude-opus-4-8",
-        CLAUDE_API_KEY: "c-key",
+        STAGEHAND_MODEL: "google/gemini-3.5-flash",
         GEMINI_API_KEY: "g-key",
+        CLAUDE_API_KEY: "c-key",
       })
     ).toEqual({
-      model: { modelName: "anthropic/claude-opus-4-8", apiKey: "c-key" },
+      model: { modelName: "google/gemini-3.5-flash", apiKey: "g-key" },
       disableAPI: false,
     })
   })
@@ -42,10 +42,10 @@ describe("resolveModel", () => {
 
   // Without its key, a model only fails mid-run with "API key not valid".
   it("names the missing key instead of starting without it", () => {
-    expect(() => resolveModel({})).toThrow("GEMINI_API_KEY is not set")
+    expect(() => resolveModel({})).toThrow("CLAUDE_API_KEY is not set")
     expect(() =>
-      resolveModel({ STAGEHAND_MODEL: "anthropic/claude-opus-4-8" })
-    ).toThrow("CLAUDE_API_KEY is not set")
+      resolveModel({ STAGEHAND_MODEL: "google/gemini-3.5-flash" })
+    ).toThrow("GEMINI_API_KEY is not set")
   })
 
   it("refuses a provider it has no key for", () => {
