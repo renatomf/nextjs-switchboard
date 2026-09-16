@@ -3,11 +3,14 @@ import { and, count, desc, eq, inArray, lt, sql } from "drizzle-orm"
 import { getDb } from "@/lib/db"
 import {
   executions,
+  webhookCalls,
   workflows,
   workflowSchedules,
   workflowVersions,
+  workflowWebhooks,
   WorkflowGraph,
   type WorkflowSchedule,
+  type WorkflowWebhook,
 } from "@/lib/db/schema"
 import {
   allowedFrom,
@@ -322,6 +325,89 @@ export async function deactivateWorkflowSchedule(triggerScheduleId: string) {
     .update(workflowSchedules)
     .set({ active: false, updatedAt: new Date() })
     .where(eq(workflowSchedules.triggerScheduleId, triggerScheduleId))
+}
+
+// The webhook of a workflow, if the workflow is this org's. What the workflow
+// page shows, and what the actions check before changing it.
+export async function getWorkflowWebhook(orgId: string, workflowId: string) {
+  const [webhook] = await getDb()
+    .select()
+    .from(workflowWebhooks)
+    .where(
+      and(
+        eq(workflowWebhooks.orgId, orgId),
+        eq(workflowWebhooks.workflowId, workflowId)
+      )
+    )
+
+  return webhook
+}
+
+// The webhook a request is addressed to. Not scoped by org: a webhook request
+// carries no session, and what proves the caller may start this workflow is
+// the signature, checked against the secret this hands back.
+export async function getWebhookForRequest(workflowId: string) {
+  const [webhook] = await getDb()
+    .select()
+    .from(workflowWebhooks)
+    .where(eq(workflowWebhooks.workflowId, workflowId))
+
+  return webhook
+}
+
+// Gives a workflow a webhook, or replaces the secret of the one it has. The
+// caller has already checked the workflow is the org's.
+export async function saveWorkflowWebhook(
+  webhook: Pick<WorkflowWebhook, "orgId" | "workflowId" | "secret">
+) {
+  const [saved] = await getDb()
+    .insert(workflowWebhooks)
+    .values(webhook)
+    .onConflictDoUpdate({
+      target: workflowWebhooks.workflowId,
+      set: { secret: webhook.secret, updatedAt: new Date() },
+    })
+    .returning()
+
+  return saved
+}
+
+// Takes a workflow's webhook away, if the workflow is this org's.
+export async function deleteWorkflowWebhook(orgId: string, workflowId: string) {
+  await getDb()
+    .delete(workflowWebhooks)
+    .where(
+      and(
+        eq(workflowWebhooks.orgId, orgId),
+        eq(workflowWebhooks.workflowId, workflowId)
+      )
+    )
+}
+
+// Counts one webhook call for a workflow in its window, and hands back how
+// many that window holds including this one. A single statement: two calls
+// landing together each get their own number, and neither decides from a
+// count it read a moment earlier.
+export async function countWebhookCall(workflowId: string, windowStart: Date) {
+  const [counted] = await getDb()
+    .insert(webhookCalls)
+    .values({ workflowId, windowStart, calls: 1 })
+    .onConflictDoUpdate({
+      target: [webhookCalls.workflowId, webhookCalls.windowStart],
+      set: { calls: sql`${webhookCalls.calls} + 1` },
+    })
+    .returning({ calls: webhookCalls.calls })
+
+  return counted.calls
+}
+
+// Records that a signed request just started a run, for the panel to show
+// when the webhook was last used.
+export async function markWebhookUsed(workflowId: string, at = new Date()) {
+  await getDb()
+    .update(workflowWebhooks)
+    .set({ lastUsedAt: at })
+    .where(eq(workflowWebhooks.workflowId, workflowId))
 }
 
 // The workflow's newest version: what a scheduled run executes.

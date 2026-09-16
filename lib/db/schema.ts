@@ -4,8 +4,10 @@ import {
   boolean,
   check,
   index,
+  integer,
   jsonb,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -176,3 +178,52 @@ export const workflowSchedules = pgTable(
 )
 
 export type WorkflowSchedule = typeof workflowSchedules.$inferSelect
+
+// How a workflow is started from outside: a secret the caller signs its
+// request with. One per workflow, and not split by environment like a
+// schedule — what separates development from production here is the host the
+// caller sends the request to, not the record.
+export const workflowWebhooks = pgTable(
+  "workflow_webhooks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workflowId: uuid("workflow_id")
+      .notNull()
+      .references(() => workflows.id, { onDelete: "cascade" }),
+    orgId: text("org_id").notNull(),
+    // Kept as it is, because checking a signature needs the secret back. The
+    // credentials vault is the step that encrypts columns like this one.
+    secret: text("secret").notNull(),
+    // When a signed request last started a run, for the panel to show.
+    lastUsedAt: timestamptz("last_used_at"),
+    createdAt: timestamptz("created_at").defaultNow().notNull(),
+    updatedAt: timestamptz("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    // One webhook per workflow, and the lookup the route does on every call.
+    uniqueIndex("workflow_webhooks_workflow_id_idx").on(table.workflowId),
+  ]
+)
+
+export type WorkflowWebhook = typeof workflowWebhooks.$inferSelect
+
+// How many webhook calls a workflow has had in one window of time. One row per
+// workflow and window, incremented as each call arrives, so two app instances
+// share a single count instead of allowing the limit each. Rows are history
+// nobody reads once their window has passed; a sweep can drop the old ones.
+export const webhookCalls = pgTable(
+  "webhook_calls",
+  {
+    workflowId: uuid("workflow_id")
+      .notNull()
+      .references(() => workflows.id, { onDelete: "cascade" }),
+    // The start of the window, as rateLimitWindowStart works it out.
+    windowStart: timestamptz("window_start").notNull(),
+    calls: integer("calls").notNull().default(0),
+  },
+  (table) => [
+    // The row a call increments, and what makes the upsert that counts it a
+    // single statement.
+    primaryKey({ columns: [table.workflowId, table.windowStart] }),
+  ]
+)

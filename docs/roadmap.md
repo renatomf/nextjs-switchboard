@@ -88,7 +88,11 @@ As decisões ficam em [`docs/adr/`](adr/).
       em cada ambiente. Um agendamento do Trigger.dev por workflow, que dispara a mesma função do
       botão Run, com o plano conferido no Clerk a cada disparo
       ([ADR 0008](adr/0008-workflows-agendados.md))
-- [ ] Trigger por webhook (HMAC, rate limiting, `Idempotency-Key`)
+- [x] Trigger por webhook: `POST /api/webhooks/workflows/[id]` com assinatura HMAC no formato do
+      Stripe (timestamp assinado junto, janela de 5 min, comparação em tempo constante), limite de 10
+      chamadas por minuto contadas no Postgres, e o `Idempotency-Key` do chamador virando a chave de
+      idempotência do disparo. Só no Pro, e a run passa pelo mesmo `startWorkflowRun`
+      ([ADR 0009](adr/0009-trigger-por-webhook.md))
 - [ ] Cofre de credenciais (criptografia envelope, segredo fora de log e de prompt)
 - [ ] Artifacts: screenshots e extrações em object storage
 - [ ] Metering e quotas por org, ligados ao Clerk Billing

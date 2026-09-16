@@ -5,7 +5,11 @@ import { ReactFlowProvider } from "@xyflow/react"
 
 import { PRO_PLAN, PlanRequiredError } from "@/lib/billing"
 import { getLiveblocks } from "@/lib/liveblocks"
-import { getWorkflow, getWorkflowSchedule } from "@/features/workflows/data"
+import {
+  getWorkflow,
+  getWorkflowSchedule,
+  getWorkflowWebhook,
+} from "@/features/workflows/data"
 import {
   planRequiredMessage,
   premiumNodeLabelsOnCanvas,
@@ -99,18 +103,27 @@ export default async function Page({
 
   // The run token, and what the Schedule tab shows: the workflow's schedule in
   // this environment, like the schedule itself.
-  const [publicAccessToken, saved] = await Promise.all([
+  const [publicAccessToken, savedSchedule, savedWebhook] = await Promise.all([
     createRunsReadToken(id),
     getWorkflowSchedule(
       orgId,
       id,
       triggerEnvironmentOf(process.env.TRIGGER_SECRET_KEY)
     ),
+    getWorkflowWebhook(orgId, id),
   ])
 
-  const schedule = saved
-    ? { preset: saved.preset, timezone: saved.timezone, active: saved.active }
+  const schedule = savedSchedule
+    ? {
+        preset: savedSchedule.preset,
+        timezone: savedSchedule.timezone,
+        active: savedSchedule.active,
+      }
     : null
+
+  // Only when it was last used: the secret stays on the server, and was shown
+  // to the browser once, when it was made.
+  const webhook = savedWebhook ? { lastUsedAt: savedWebhook.lastUsedAt } : null
 
   // The palette lives in the sidebar, outside <ReactFlow>, so the provider has
   // to sit above both of them for the two to share a single React Flow store.
@@ -121,7 +134,11 @@ export default async function Page({
           workflowId={id}
           publicAccessToken={publicAccessToken}
         >
-          <WorkflowShell workflowId={id} schedule={schedule} />
+          <WorkflowShell
+            workflowId={id}
+            schedule={schedule}
+            webhook={webhook}
+          />
         </WorkflowRunsProvider>
       </ReactFlowProvider>
     </Room>
