@@ -44,6 +44,11 @@ agendamento não têm.
   com duas instâncias do app, cada uma contaria metade.
 - **O `Idempotency-Key` do chamador vira a chave de idempotência do disparo,** prefixada com o
   workflow. O mesmo evento entregue duas vezes é uma run só.
+- **A resposta diz o que a chamada fez, e não o que seria mais simples dizer:** `started` quando a
+  run foi iniciada agora, `already-running` quando já havia uma em andamento, e `duplicate` quando a
+  chave do chamador já tinha iniciado aquela run, mesmo que ela já tenha terminado. O Trigger.dev
+  informa isso no `isCached` do disparo, que o teste de ponta a ponta mostrou existir mesmo não
+  estando no tipo do handle de disparo único.
 - **A run passa pelo mesmo `startWorkflowRun`** do botão Run e do agendamento, com a tag `webhook`.
 - **Só no plano Pro,** conferido a cada chamada na API de backend do Clerk, como faz a task agendada.
   Clerk fora do ar responde 503 e não inicia nada.

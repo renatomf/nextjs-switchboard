@@ -168,20 +168,23 @@ export async function POST(
 
   await markWebhookUsed(workflowId)
 
-  Sentry.logger.info("Webhook call started a run", {
+  // What this call actually did, which is not always "started a run": a run
+  // was going already, or the caller's key had started this one before, even
+  // if it has since finished.
+  const status = started.alreadyGoing
+    ? "already-running"
+    : started.isCached
+      ? "duplicate"
+      : "started"
+
+  Sentry.logger.info("Webhook call answered", {
     orgId,
     workflowId,
     runId: started.runId,
-    alreadyGoing: started.alreadyGoing,
+    status,
   })
 
   // 202: the run is accepted and goes on after this answer. The caller gets
   // the run's id, which is what it would need to ask about it later.
-  return Response.json(
-    {
-      runId: started.runId,
-      status: started.alreadyGoing ? "already-running" : "started",
-    },
-    { status: 202 }
-  )
+  return Response.json({ runId: started.runId, status }, { status: 202 })
 }

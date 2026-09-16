@@ -120,6 +120,27 @@ describe("POST /api/webhooks/workflows/[id]", () => {
     })
   })
 
+  // Trigger.dev hands back the run an idempotency key already started rather
+  // than starting another, even once that run is over. Calling that "started"
+  // would tell the sender something this route did not do.
+  it("says so when the key had already started that run", async () => {
+    startWorkflowRun.mockResolvedValue({
+      alreadyGoing: false,
+      runId: "run_1",
+      versionId: "ver_3",
+      queue: "runs-pro",
+      isCached: true,
+    })
+
+    const response = await call({ headers: { "idempotency-key": "evt_123" } })
+
+    expect(response.status).toBe(202)
+    await expect(response.json()).resolves.toEqual({
+      runId: "run_1",
+      status: "duplicate",
+    })
+  })
+
   // The same event delivered twice — which every sender does eventually —
   // must not become two runs.
   it("passes the caller's idempotency key on, under the workflow", async () => {

@@ -37,6 +37,9 @@ type StartedRun =
       runId: string
       versionId: string
       queue: string
+      // True when an idempotency key handed this run back instead of starting
+      // one: the run already existed, and may well be over.
+      isCached: boolean
       // A failed write of the run's execution row. The run is going ahead
       // regardless, and the worker writes the row itself when it starts, so
       // the caller reports this rather than failing over it.
@@ -109,11 +112,17 @@ export async function startWorkflowRun({
       (error: unknown) => error
     )
 
+    // Trigger.dev sends this on a run an idempotency key matched, but only
+    // says so in the type of a batched handle, so it is read for what it is
+    // and defaults to "this really is new".
+    const { isCached = false } = handle as { isCached?: boolean }
+
     return {
       alreadyGoing: false,
       runId: handle.id,
       versionId,
       queue: placement.queue,
+      isCached,
       recordError,
     }
   })
