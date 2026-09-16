@@ -11,6 +11,7 @@ import {
   rateLimitWindowStart,
   retryAfterSeconds,
 } from "@/features/workflows/lib/webhook-rate-limit"
+import { secondsUntilNextMonth } from "@/features/workflows/lib/run-quota"
 import { verifyWebhookSignature } from "@/features/workflows/lib/webhook-signature"
 import { startWorkflowRun } from "@/features/workflows/start-run"
 import { fetchOrgIsPro } from "@/lib/org-plan"
@@ -157,7 +158,31 @@ export async function POST(
       : {}),
   })
 
-  if (!started.alreadyGoing && started.recordError !== undefined) {
+  // Out of runs for the month. Not "slow down" like the rate limit, but the
+  // sender is an automated one: it is told how long the month has left rather
+  // than left to guess.
+  if (started.outcome === "over-quota") {
+    Sentry.logger.warn("Webhook call refused — quota", {
+      orgId,
+      workflowId,
+      used: started.used,
+      limit: started.limit,
+    })
+
+    return Response.json(
+      {
+        error: "This organization has used its runs for the month",
+        used: started.used,
+        limit: started.limit,
+      },
+      {
+        status: 429,
+        headers: { "retry-after": String(secondsUntilNextMonth(new Date())) },
+      }
+    )
+  }
+
+  if (started.outcome === "started" && started.recordError !== undefined) {
     // The run is going ahead, and the worker writes the row itself when it
     // starts. Reported, since the row is late until then.
     Sentry.captureException(started.recordError, {
@@ -171,11 +196,12 @@ export async function POST(
   // What this call actually did, which is not always "started a run": a run
   // was going already, or the caller's key had started this one before, even
   // if it has since finished.
-  const status = started.alreadyGoing
-    ? "already-running"
-    : started.isCached
-      ? "duplicate"
-      : "started"
+  const status =
+    started.outcome === "already-going"
+      ? "already-running"
+      : started.isCached
+        ? "duplicate"
+        : "started"
 
   Sentry.logger.info("Webhook call answered", {
     orgId,

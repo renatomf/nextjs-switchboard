@@ -484,9 +484,17 @@ function RunControl({ workflowId }: { workflowId: string }) {
 
     startTransition(async () => {
       try {
-        const handle = await runWorkflowAction({ id: workflowId, graph })
+        const result = await runWorkflowAction({ id: workflowId, graph })
 
-        setStartedId(handle.id)
+        // The org has spent the month's runs. Nothing was started, so the
+        // button stays on Run, and the numbers go in the message: "out of
+        // runs" without them leaves the user nothing to act on.
+        if (result.ok === false) {
+          toast.error(result.error)
+          return
+        }
+
+        setStartedId(result.id)
       } catch (error) {
         Sentry.logger.error("Workflow run failed to start", {
           workflowId,

@@ -2,11 +2,17 @@ import { runs, tasks } from "@trigger.dev/sdk"
 
 import type { runWorkflowTask } from "@/features/workflows/tasks/run-workflow"
 import {
+  countOrgRunsSince,
   getLatestUnsettledExecution,
   recordExecution,
   withWorkflowRunLock,
 } from "@/features/workflows/data"
 import { isLiveRunStatus } from "@/features/workflows/lib/run-liveness"
+import {
+  isOverRunQuota,
+  monthStart,
+  runQuotaFor,
+} from "@/features/workflows/lib/run-quota"
 import { runQueueFor } from "@/features/workflows/lib/run-queues"
 import {
   RUN_WORKFLOW_TASK_ID,
@@ -31,9 +37,12 @@ async function findLiveRun(orgId: string, workflowId: string) {
 }
 
 type StartedRun =
-  | { alreadyGoing: true; runId: string }
+  | { outcome: "already-going"; runId: string }
+  // Nothing was started: the org has used the runs its plan allows this
+  // month. The numbers come back so the caller can say which they are.
+  | { outcome: "over-quota"; used: number; limit: number }
   | {
-      alreadyGoing: false
+      outcome: "started"
       runId: string
       versionId: string
       queue: string
@@ -79,7 +88,20 @@ export async function startWorkflowRun({
   return withWorkflowRunLock(workflowId, async () => {
     const liveRunId = await findLiveRun(orgId, workflowId)
 
-    if (liveRunId) return { alreadyGoing: true, runId: liveRunId }
+    if (liveRunId) return { outcome: "already-going", runId: liveRunId }
+
+    // Counted under the lock, like the check above: two starts landing
+    // together must not both see the same last slot of the month. A run
+    // handed back above costs nothing, since nothing is started.
+    const now = new Date()
+    const used = await countOrgRunsSince(orgId, monthStart(now))
+    const limit = runQuotaFor(isPro)
+
+    // Before publishing: a start that is going to be refused should leave no
+    // version behind.
+    if (isOverRunQuota(used, isPro)) {
+      return { outcome: "over-quota", used, limit }
+    }
 
     const { id: versionId } = await version()
 
@@ -118,7 +140,7 @@ export async function startWorkflowRun({
     const { isCached = false } = handle as { isCached?: boolean }
 
     return {
-      alreadyGoing: false,
+      outcome: "started",
       runId: handle.id,
       versionId,
       queue: placement.queue,

@@ -47,7 +47,7 @@ describe("runScheduledWorkflow", () => {
     fetchOrgIsPro.mockResolvedValue(true)
     getLatestWorkflowVersion.mockResolvedValue({ id: "ver_3" })
     startWorkflowRun.mockResolvedValue({
-      alreadyGoing: false,
+      outcome: "started",
       runId: "run_1",
       versionId: "ver_3",
       queue: "runs-pro",
@@ -94,7 +94,7 @@ describe("runScheduledWorkflow", () => {
   // the last time, or from a person, is left to finish.
   it("leaves a run already going alone", async () => {
     startWorkflowRun.mockResolvedValue({
-      alreadyGoing: true,
+      outcome: "already-going",
       runId: "run_live",
     })
 
@@ -102,6 +102,21 @@ describe("runScheduledWorkflow", () => {
       outcome: "already-going",
       runId: "run_live",
     })
+  })
+
+  // A quota runs out for the month and comes back with the next one, unlike
+  // leaving Pro: the schedule stays on and tries again at its next time.
+  it("leaves the schedule on when the org is out of runs for the month", async () => {
+    startWorkflowRun.mockResolvedValue({
+      outcome: "over-quota",
+      used: 20,
+      limit: 20,
+    })
+
+    await expect(run()).resolves.toEqual({ outcome: "over-quota" })
+
+    expect(deactivateSchedule).not.toHaveBeenCalled()
+    expect(deactivateWorkflowSchedule).not.toHaveBeenCalled()
   })
 
   it("turns the schedule off once the org is no longer on Pro", async () => {

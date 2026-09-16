@@ -16,6 +16,7 @@ const SCHEDULED_RUN_TAG = "scheduled"
 type ScheduledRunOutcome =
   | { outcome: "started"; runId: string }
   | { outcome: "already-going"; runId: string }
+  | { outcome: "over-quota" }
   | { outcome: "plan-required" }
   | { outcome: "no-record" }
   | { outcome: "inactive" }
@@ -73,9 +74,14 @@ export async function runScheduledWorkflow({
     tags: [SCHEDULED_RUN_TAG],
   })
 
-  if (started.alreadyGoing) {
+  if (started.outcome === "already-going") {
     return { outcome: "already-going", runId: started.runId }
   }
+
+  // Out of runs for the month. The schedule stays on, unlike an org that left
+  // Pro: a quota comes back with the next month, and turning the schedule off
+  // would need someone to notice and turn it on again.
+  if (started.outcome === "over-quota") return { outcome: "over-quota" }
 
   // The run goes ahead, and the worker writes the row itself when it starts.
   // Reported, since the row is late until then.

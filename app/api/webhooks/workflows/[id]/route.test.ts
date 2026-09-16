@@ -74,7 +74,7 @@ describe("POST /api/webhooks/workflows/[id]", () => {
     fetchOrgIsPro.mockResolvedValue(true)
     getLatestWorkflowVersion.mockResolvedValue({ id: "ver_3" })
     startWorkflowRun.mockResolvedValue({
-      alreadyGoing: false,
+      outcome: "started",
       runId: "run_1",
       versionId: "ver_3",
       queue: "runs-pro",
@@ -107,7 +107,7 @@ describe("POST /api/webhooks/workflows/[id]", () => {
   // going gets that run back rather than a second one.
   it("hands back the run already going", async () => {
     startWorkflowRun.mockResolvedValue({
-      alreadyGoing: true,
+      outcome: "already-going",
       runId: "run_live",
     })
 
@@ -125,7 +125,7 @@ describe("POST /api/webhooks/workflows/[id]", () => {
   // would tell the sender something this route did not do.
   it("says so when the key had already started that run", async () => {
     startWorkflowRun.mockResolvedValue({
-      alreadyGoing: false,
+      outcome: "started",
       runId: "run_1",
       versionId: "ver_3",
       queue: "runs-pro",
@@ -207,6 +207,25 @@ describe("POST /api/webhooks/workflows/[id]", () => {
       expect(response.status).toBe(429)
       expect(Number(response.headers.get("retry-after"))).toBeGreaterThan(0)
       expect(startWorkflowRun).not.toHaveBeenCalled()
+    })
+
+    // Out of runs for the month is not "slow down", but the sender is an
+    // automated one: it is told how long the month has left rather than
+    // being left to guess.
+    it("an org out of runs for the month, saying when to come back", async () => {
+      startWorkflowRun.mockResolvedValue({
+        outcome: "over-quota",
+        used: 500,
+        limit: 500,
+      })
+
+      const response = await call()
+
+      expect(response.status).toBe(429)
+      expect(Number(response.headers.get("retry-after"))).toBeGreaterThan(0)
+      await expect(response.json()).resolves.toEqual(
+        expect.objectContaining({ used: 500, limit: 500 })
+      )
     })
 
     it("an org no longer on Pro", async () => {
