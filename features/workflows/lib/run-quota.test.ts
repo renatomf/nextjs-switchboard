@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import {
   isOverRunQuota,
+  isUsageOverQuota,
   monthStart,
   RUN_QUOTAS,
   runQuotaFor,
@@ -45,6 +46,33 @@ describe("runQuotaFor", () => {
   it("leaves room to try the product, without leaving the cost open", () => {
     expect(RUN_QUOTAS.free).toBeGreaterThan(0)
     expect(RUN_QUOTAS.pro).toBeLessThanOrEqual(2000)
+  })
+})
+
+// The same ceiling, asked with numbers already counted instead of a plan: the
+// sidebar was handed a used and a limit, and must not spell the comparison out
+// again on its own.
+describe("isUsageOverQuota", () => {
+  it("leaves the last allowed run open", () => {
+    expect(isUsageOverQuota({ used: 19, limit: 20 })).toBe(false)
+  })
+
+  it("is over once the count has reached the limit", () => {
+    expect(isUsageOverQuota({ used: 20, limit: 20 })).toBe(true)
+  })
+
+  // An org that dropped to a smaller plan mid-month lands above a limit it
+  // never crossed one run at a time.
+  it("stays over when the count is past the limit", () => {
+    expect(isUsageOverQuota({ used: 501, limit: 500 })).toBe(true)
+  })
+
+  it("answers the same as the plan-side check", () => {
+    const used = RUN_QUOTAS.free
+
+    expect(isUsageOverQuota({ used, limit: runQuotaFor(false) })).toBe(
+      isOverRunQuota(used, false)
+    )
   })
 })
 

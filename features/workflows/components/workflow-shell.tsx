@@ -3,6 +3,7 @@ import { ConsolePanel } from "@/features/workflows/components/console-panel"
 import { RightSidebar } from "@/features/workflows/components/right-sidebar"
 import type { ScheduleSummary } from "@/features/workflows/components/schedule-panel"
 import type { WebhookSummary } from "@/features/workflows/components/webhook-panel"
+import type { RunUsage } from "@/features/workflows/lib/run-quota"
 import {
   ResizableHandle,
   ResizablePanel,
@@ -15,12 +16,16 @@ interface WorkflowShellProps {
   schedule: ScheduleSummary | null
   // Its webhook, without the secret: that is shown once, when it is made.
   webhook: WebhookSummary | null
+  // The org's runs this month against what its plan allows, as counted when
+  // the page rendered.
+  usage: RunUsage
 }
 
 export function WorkflowShell({
   workflowId,
   schedule,
   webhook,
+  usage,
 }: WorkflowShellProps) {
   return (
     <ResizablePanelGroup
@@ -54,6 +59,7 @@ export function WorkflowShell({
           workflowId={workflowId}
           schedule={schedule}
           webhook={webhook}
+          usage={usage}
         />
       </ResizablePanel>
     </ResizablePanelGroup>

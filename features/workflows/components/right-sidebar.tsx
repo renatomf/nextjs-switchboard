@@ -52,6 +52,10 @@ import {
 } from "@/features/workflows/components/workflow-runs-provider"
 import { useProPlan } from "@/features/workflows/hooks/use-pro-plan"
 import { useUpstreamConnections } from "@/features/workflows/hooks/use-upstream-connections"
+import {
+  isUsageOverQuota,
+  type RunUsage,
+} from "@/features/workflows/lib/run-quota"
 import { validateGraph } from "@/features/workflows/lib/validate-graph"
 import { cn } from "@/lib/utils"
 import {
@@ -579,10 +583,12 @@ export function RightSidebar({
   workflowId,
   schedule,
   webhook,
+  usage,
 }: {
   workflowId: string
   schedule: ScheduleSummary | null
   webhook: WebhookSummary | null
+  usage: RunUsage
 }) {
   const [tab, setTab] = useState("toolbar")
 
@@ -603,6 +609,17 @@ export function RightSidebar({
         <div className="flex items-center justify-between border-b border-border p-2">
           <ActionsMenu workflowId={workflowId} />
           <RunControl workflowId={workflowId} />
+        </div>
+        {/* Under the Run button, where someone looks when a run is refused.
+            The same >= the server refuses on decides the warning colour, so
+            the line turns before the click, not after it. */}
+        <div
+          className={cn(
+            "border-b border-border px-2 py-1 text-xs text-muted-foreground",
+            isUsageOverQuota(usage) && "text-destructive"
+          )}
+        >
+          {usage.used} / {usage.limit} runs this month
         </div>
         <TabsList className="m-2 w-fit bg-background">
           <TabsTrigger value="toolbar" className={tabTriggerClassName}>
