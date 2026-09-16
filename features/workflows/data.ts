@@ -1,4 +1,4 @@
-import { and, count, desc, eq, inArray, lt, sql } from "drizzle-orm"
+import { and, count, desc, eq, gte, inArray, lt, sql } from "drizzle-orm"
 
 import { getDb } from "@/lib/db"
 import {
@@ -187,6 +187,18 @@ export function listUnsettledExecutions({
     )
     .orderBy(desc(executions.createdAt))
     .limit(limit)
+}
+
+// How many runs an org has started since a point in time, whatever became of
+// them: a run that failed still opened a session and called a model. What the
+// monthly quota is counted against.
+export async function countOrgRunsSince(orgId: string, since: Date) {
+  const [{ value }] = await getDb()
+    .select({ value: count() })
+    .from(executions)
+    .where(and(eq(executions.orgId, orgId), gte(executions.createdAt, since)))
+
+  return value
 }
 
 export async function setExecutionBrowserSession(

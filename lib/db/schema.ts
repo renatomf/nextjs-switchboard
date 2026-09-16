@@ -125,6 +125,9 @@ export const executions = pgTable(
     ),
     // The cascade from a deleted version would otherwise scan the table.
     index("executions_version_id_idx").on(table.versionId),
+    // Counting an org's runs this month, which every run start now does under
+    // the workflow's lock: without this it would read every row in the table.
+    index("executions_org_id_created_at_idx").on(table.orgId, table.createdAt),
     // The replay route finds a run by its browser session. One session
     // belongs to one run; runs without a session are all null, which a
     // unique index allows.
