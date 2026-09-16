@@ -95,7 +95,12 @@ As decisões ficam em [`docs/adr/`](adr/).
       ([ADR 0009](adr/0009-trigger-por-webhook.md))
 - [ ] Cofre de credenciais (criptografia envelope, segredo fora de log e de prompt)
 - [ ] Artifacts: screenshots e extrações em object storage
-- [ ] Metering e quotas por org, ligados ao Clerk Billing
+- [x] Cotas de run por organização: 20 por mês no free e 500 no Pro, contadas na tabela de execuções
+      por mês civil (UTC) e conferidas dentro da trava de run, antes de publicar a versão. Cada porta
+      recusa do seu jeito — o botão mostra os números, o webhook responde 429 com `Retry-After`, e o
+      agendamento continua ligado ([ADR 0010](adr/0010-cotas-por-organizacao.md))
+- [ ] Cobrança por uso ligada ao Clerk Billing: hoje a cota recusa e nada é reportado ao Clerk como
+      consumo. Cobrar pelas runs acima da cota, em vez de recusá-las, é outra decisão
 - [ ] Agent com ferramentas sobre o Vercel AI SDK, junto com a migração para o Stagehand 4
       ([ADR 0005](adr/0005-stagehand-4-adiado.md))
 
