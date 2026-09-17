@@ -93,7 +93,11 @@ As decisões ficam em [`docs/adr/`](adr/).
       chamadas por minuto contadas no Postgres, e o `Idempotency-Key` do chamador virando a chave de
       idempotência do disparo. Só no Pro, e a run passa pelo mesmo `startWorkflowRun`
       ([ADR 0009](adr/0009-trigger-por-webhook.md))
-- [ ] Cofre de credenciais (criptografia envelope, segredo fora de log e de prompt)
+- [x] Cofre de credenciais: o segredo do webhook é selado com envelope — chave de dados por segredo,
+      embrulhada por uma chave-mestra do ambiente — e o limite do texto em claro é a camada de dados,
+      que sela ao gravar e abre ao conferir a assinatura. A consulta da página nem seleciona a coluna,
+      e um segredo que não abre responde 503 antes de contar o limite de frequência
+      ([ADR 0011](adr/0011-cofre-de-credenciais.md))
 - [ ] Artifacts: screenshots e extrações em object storage
 - [x] Cotas de run por organização: 20 por mês no free e 500 no Pro, contadas na tabela de execuções
       por mês civil (UTC) e conferidas dentro da trava de run, antes de publicar a versão. Cada porta
