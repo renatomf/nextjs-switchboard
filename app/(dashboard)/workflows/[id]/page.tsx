@@ -6,6 +6,7 @@ import { ReactFlowProvider } from "@xyflow/react"
 import { PRO_PLAN, PlanRequiredError } from "@/lib/billing"
 import { getLiveblocks } from "@/lib/liveblocks"
 import {
+  countOrgRunsSince,
   getWorkflow,
   getWorkflowSchedule,
   getWorkflowWebhook,
@@ -14,6 +15,7 @@ import {
   planRequiredMessage,
   premiumNodeLabelsOnCanvas,
 } from "@/features/workflows/lib/premium-gate"
+import { monthStart, runQuotaFor } from "@/features/workflows/lib/run-quota"
 import { createRunsReadToken } from "@/features/workflows/lib/runs-token"
 import { triggerEnvironmentOf } from "@/features/workflows/lib/trigger-environment"
 import { PlanRequired } from "@/features/workflows/components/plan-required"
@@ -50,7 +52,9 @@ export default async function Page({
   // Only asked when it can change the outcome, so a pro org never pays for the
   // extra room read, and it runs before any room or token is minted for a
   // canvas that is not going to render.
-  if (!has({ plan: PRO_PLAN })) {
+  const isPro = has({ plan: PRO_PLAN })
+
+  if (!isPro) {
     const premium = await premiumNodeLabelsOnCanvas(id, workflow?.graph ?? null)
 
     if (premium.length > 0) {
@@ -101,17 +105,20 @@ export default async function Page({
     },
   })
 
-  // The run token, and what the Schedule tab shows: the workflow's schedule in
-  // this environment, like the schedule itself.
-  const [publicAccessToken, savedSchedule, savedWebhook] = await Promise.all([
-    createRunsReadToken(id),
-    getWorkflowSchedule(
-      orgId,
-      id,
-      triggerEnvironmentOf(process.env.TRIGGER_SECRET_KEY)
-    ),
-    getWorkflowWebhook(orgId, id),
-  ])
+  // The run token, what the Schedule tab shows — the workflow's schedule in
+  // this environment, like the schedule itself — and how many runs the org has
+  // spent this month, which the sidebar shows next to the Run button.
+  const [publicAccessToken, savedSchedule, savedWebhook, runsThisMonth] =
+    await Promise.all([
+      createRunsReadToken(id),
+      getWorkflowSchedule(
+        orgId,
+        id,
+        triggerEnvironmentOf(process.env.TRIGGER_SECRET_KEY)
+      ),
+      getWorkflowWebhook(orgId, id),
+      countOrgRunsSince(orgId, monthStart(new Date())),
+    ])
 
   const schedule = savedSchedule
     ? {
@@ -124,6 +131,12 @@ export default async function Page({
   // Only when it was last used: the secret stays on the server, and was shown
   // to the browser once, when it was made.
   const webhook = savedWebhook ? { lastUsedAt: savedWebhook.lastUsedAt } : null
+
+  // Counted once, when the page renders: a run started in this tab does not
+  // move this number until the page is loaded again. The refusal itself comes
+  // from the server on every start, so a stale number here cannot let a run
+  // past the quota — it can only be out of date on screen.
+  const usage = { used: runsThisMonth, limit: runQuotaFor(isPro) }
 
   // The palette lives in the sidebar, outside <ReactFlow>, so the provider has
   // to sit above both of them for the two to share a single React Flow store.
@@ -138,6 +151,7 @@ export default async function Page({
             workflowId={id}
             schedule={schedule}
             webhook={webhook}
+            usage={usage}
           />
         </WorkflowRunsProvider>
       </ReactFlowProvider>

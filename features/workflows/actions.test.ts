@@ -26,6 +26,7 @@ const {
   triggerTask,
   withWorkflowRunLock,
   getLatestUnsettledExecution,
+  countOrgRunsSince,
   createPublicToken,
   getWorkflowSchedule,
   countOrgSchedules,
@@ -47,6 +48,7 @@ const {
   triggerTask: vi.fn(),
   withWorkflowRunLock: vi.fn(),
   getLatestUnsettledExecution: vi.fn(),
+  countOrgRunsSince: vi.fn(),
   createPublicToken: vi.fn(),
   getWorkflowSchedule: vi.fn(),
   countOrgSchedules: vi.fn(),
@@ -77,6 +79,7 @@ vi.mock("@/features/workflows/data", () => ({
   advanceExecution,
   withWorkflowRunLock,
   getLatestUnsettledExecution,
+  countOrgRunsSince,
   getWorkflowSchedule,
   countOrgSchedules,
   saveWorkflowSchedule,
@@ -110,6 +113,7 @@ describe("runWorkflowAction", () => {
     auth.mockResolvedValue({ orgId: "org_a", has: () => true })
     getWorkflow.mockResolvedValue({ id: "wf_1", orgId: "org_a" })
     getLatestUnsettledExecution.mockResolvedValue(undefined)
+    countOrgRunsSince.mockResolvedValue(0)
     triggerTask.mockResolvedValue({ id: "run_1" })
     recordExecution.mockResolvedValue(undefined)
     withWorkflowRunLock.mockImplementation(
@@ -289,6 +293,49 @@ describe("runWorkflowAction", () => {
         expect(triggerTask).toHaveBeenCalledTimes(2)
         expect(first).not.toEqual(second)
       })
+    })
+  })
+
+  // Every run opens a browser session and calls a model, so a month has a
+  // ceiling. The refusal comes back as a result, with the numbers, because in
+  // production the message of a thrown error never reaches the browser.
+  describe("the month's quota", () => {
+    it("refuses a run once the org has used its month", async () => {
+      countOrgRunsSince.mockResolvedValue(20)
+      auth.mockResolvedValue({ orgId: "org_a", has: () => false })
+
+      await expect(runWorkflowAction({ id: "wf_1", graph })).resolves.toEqual({
+        ok: false,
+        error: expect.stringContaining("20"),
+        used: 20,
+        limit: 20,
+      })
+      expect(publishWorkflowVersion).not.toHaveBeenCalled()
+      expect(triggerTask).not.toHaveBeenCalled()
+    })
+
+    it("holds a paying org to its own, larger quota", async () => {
+      countOrgRunsSince.mockResolvedValue(20)
+      publishWorkflowVersion.mockResolvedValue({ id: "ver_1" })
+
+      await runWorkflowAction({ id: "wf_1", graph })
+
+      expect(triggerTask).toHaveBeenCalled()
+    })
+
+    // Counted under the lock, like the check for a run already going: two
+    // starts landing together must not both see the same last slot.
+    it("counts the month's runs while holding the workflow's lock", async () => {
+      const underLock: string[] = []
+      countOrgRunsSince.mockImplementation(async () => {
+        if (lock.held) underLock.push("count")
+        return 0
+      })
+      publishWorkflowVersion.mockResolvedValue({ id: "ver_1" })
+
+      await runWorkflowAction({ id: "wf_1", graph })
+
+      expect(underLock).toEqual(["count"])
     })
   })
 

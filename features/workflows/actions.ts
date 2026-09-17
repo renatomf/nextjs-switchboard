@@ -225,13 +225,32 @@ export async function runWorkflowAction({
       ),
   })
 
-  if (started.alreadyGoing) {
+  if (started.outcome === "already-going") {
     Sentry.logger.info("Workflow run already going", {
       orgId,
       workflowId: id,
       runId: started.runId,
     })
     return { id: started.runId }
+  }
+
+  // The month's ceiling, reported to the user with the numbers rather than
+  // thrown: in production the message of a thrown error does not reach the
+  // browser.
+  if (started.outcome === "over-quota") {
+    Sentry.logger.warn("Workflow run refused — quota", {
+      orgId,
+      workflowId: id,
+      used: started.used,
+      limit: started.limit,
+    })
+
+    return {
+      ok: false as const,
+      error: `This organization has used ${started.used} of its ${started.limit} runs this month.`,
+      used: started.used,
+      limit: started.limit,
+    }
   }
 
   // Not worth failing the Run button over: the run is already in Trigger.dev,
