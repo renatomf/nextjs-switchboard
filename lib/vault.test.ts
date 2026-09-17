@@ -9,8 +9,13 @@ import { decryptSecret, encryptSecret } from "./vault"
 const KEY_A = randomBytes(32).toString("base64")
 const KEY_B = randomBytes(32).toString("base64")
 
-// Shaped like the thing this actually protects today.
-const SECRET = "whsec_zH8Kq2mVx4pL9nR7tY3wB6cF1dG5jS0a"
+// Deliberately unconvincing, and it has to stay that way. The whsec_ prefix
+// earns its place — a test below asserts the envelope gives it away — but the
+// rest is words instead of entropy: the first version of this line was random
+// base64, which is exactly the shape of a Stripe webhook signing secret, and
+// GitHub's scanner reported the push as a leaked credential. Every other
+// fixture in this repository already reads like this.
+const SECRET = "whsec_not_a_real_secret_only_a_test_fixture"
 
 // The envelope's parts, in order. Named so a test that tampers with one says
 // which one it broke.
