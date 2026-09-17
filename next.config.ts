@@ -11,7 +11,7 @@ export default withSentryConfig(nextConfig, {
 
   org: "ammodev",
 
-  project: "browserbase",
+  project: "switchboard",
 
   // Source map upload token. Read explicitly so the build fails loudly on a
   // missing token instead of quietly shipping unreadable stack traces.
