@@ -199,6 +199,21 @@ describe("POST /api/webhooks/workflows/[id]", () => {
       expect(startWorkflowRun).not.toHaveBeenCalled()
     })
 
+    // What the window between deploying the vault and rotating a secret that
+    // was stored before it looks like from outside: the row is there and the
+    // caller is honest, but the value cannot be opened. Answered as "not right
+    // now" rather than crashing into a 500 — and without spending the sender's
+    // rate limit on our problem.
+    it("a secret it cannot open, telling the sender to come back", async () => {
+      getWebhookForRequest.mockRejectedValue(new Error("Not a sealed secret"))
+
+      const response = await call()
+
+      expect(response.status).toBe(503)
+      expect(countWebhookCall).not.toHaveBeenCalled()
+      expect(startWorkflowRun).not.toHaveBeenCalled()
+    })
+
     it("a caller past the limit, telling it how long to wait", async () => {
       countWebhookCall.mockResolvedValue(11)
 
