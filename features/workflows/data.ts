@@ -12,6 +12,7 @@ import {
   type WorkflowSchedule,
   type WorkflowWebhook,
 } from "@/lib/db/schema"
+import { decryptSecret, encryptSecret } from "@/lib/vault"
 import {
   allowedFrom,
   statusAfter,
@@ -340,10 +341,12 @@ export async function deactivateWorkflowSchedule(triggerScheduleId: string) {
 }
 
 // The webhook of a workflow, if the workflow is this org's. What the workflow
-// page shows, and what the actions check before changing it.
+// page shows — and only that. The secret is deliberately not selected: this
+// path renders a page, so the one way to be sure a secret never reaches it is
+// for the query not to ask for one.
 export async function getWorkflowWebhook(orgId: string, workflowId: string) {
   const [webhook] = await getDb()
-    .select()
+    .select({ lastUsedAt: workflowWebhooks.lastUsedAt })
     .from(workflowWebhooks)
     .where(
       and(
@@ -364,7 +367,13 @@ export async function getWebhookForRequest(workflowId: string) {
     .from(workflowWebhooks)
     .where(eq(workflowWebhooks.workflowId, workflowId))
 
-  return webhook
+  if (!webhook) return undefined
+
+  // Opened here rather than by the route, so no caller can forget and compare
+  // a signature against a sealed value — which would fail every request with
+  // "signature does not match" and send whoever debugs it after the sender's
+  // code instead of ours. A secret that cannot be opened throws.
+  return { ...webhook, secret: decryptSecret(webhook.secret) }
 }
 
 // Gives a workflow a webhook, or replaces the secret of the one it has. The
@@ -372,12 +381,17 @@ export async function getWebhookForRequest(workflowId: string) {
 export async function saveWorkflowWebhook(
   webhook: Pick<WorkflowWebhook, "orgId" | "workflowId" | "secret">
 ) {
+  // Sealed here, so the plaintext a caller hands over never reaches a column.
+  // Once for both branches: the insert and the update must store the same
+  // envelope, and sealing twice would make two different ones.
+  const secret = encryptSecret(webhook.secret)
+
   const [saved] = await getDb()
     .insert(workflowWebhooks)
-    .values(webhook)
+    .values({ ...webhook, secret })
     .onConflictDoUpdate({
       target: workflowWebhooks.workflowId,
-      set: { secret: webhook.secret, updatedAt: new Date() },
+      set: { secret, updatedAt: new Date() },
     })
     .returning()
 

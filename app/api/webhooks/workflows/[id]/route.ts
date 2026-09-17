@@ -48,7 +48,27 @@ export async function POST(
   // parsing and re-serializing it would change them.
   const body = await request.text()
 
-  const webhook = await getWebhookForRequest(workflowId)
+  // The stored secret is sealed, and opening it needs the master key. Failing
+  // here is not the caller's fault and not something it can fix: the key is
+  // missing, or the row was sealed by a key this process no longer has. It is
+  // also exactly what the window between deploying the vault and rotating an
+  // old plaintext secret looks like, so it is reported and answered as "not
+  // right now" rather than crashing into a 500.
+  let webhook: Awaited<ReturnType<typeof getWebhookForRequest>>
+
+  try {
+    webhook = await getWebhookForRequest(workflowId)
+  } catch (error) {
+    Sentry.captureException(error, {
+      tags: { route: "webhook", area: "vault" },
+      extra: { workflowId },
+    })
+
+    return Response.json(
+      { error: "Cannot verify this webhook right now" },
+      { status: 503 }
+    )
+  }
 
   // The same answer for a workflow with no webhook and a workflow that does
   // not exist, so a caller cannot learn which ids are real.
