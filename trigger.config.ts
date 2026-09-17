@@ -30,7 +30,7 @@ export default defineConfig({
       esbuildPlugin(
         sentryEsbuildPlugin({
           org: "ammodev",
-          project: "browserbase",
+          project: "switchboard",
           // Set SENTRY_AUTH_TOKEN in the Trigger.dev environment for deploys;
           // locally it comes from the gitignored .env.sentry-build-plugin.
           authToken: process.env.SENTRY_AUTH_TOKEN,
