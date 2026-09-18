@@ -11,7 +11,12 @@
     // tsconfig.json rather than through an import.
     "liveblocks.config.ts",
     // Neon config-as-code, read by the Neon tooling.
-    "neon.ts"
+    "neon.ts",
+    // Playwright finds these by config, not by import — the same reason the
+    // Trigger.dev tasks above are listed. Without them the e2e setup files
+    // read as dead code and @clerk/testing as an unused dependency. The
+    // config file itself knip already finds through its Playwright plugin.
+    "e2e/**/*.ts"
   ],
   // Skill bundles with templates and scripts written for other projects.
   // .agents/ holds the originals and .claude/skills links to them. On Windows
