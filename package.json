@@ -18,7 +18,9 @@
     "trigger:deploy": "trigger deploy",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "e2e": "playwright test",
+    "e2e:ui": "playwright test --ui"
   },
   "dependencies": {
     "@browserbasehq/sdk": "^2.20.0",
@@ -62,6 +64,8 @@
     "unique-names-generator": "^4.7.1"
   },
   "devDependencies": {
+    "@clerk/testing": "^2.2.36",
+    "@playwright/test": "^1.63.0",
     "@sentry/esbuild-plugin": "^5.4.0",
     "@tailwindcss/postcss": "^4",
     "@trigger.dev/build": "4.5.16",
