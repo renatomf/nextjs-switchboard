@@ -53,6 +53,10 @@ import {
 import { useProPlan } from "@/features/workflows/hooks/use-pro-plan"
 import { useUpstreamConnections } from "@/features/workflows/hooks/use-upstream-connections"
 import {
+  activeRunFor,
+  SETTLE_TIMEOUT_MS,
+} from "@/features/workflows/lib/active-run"
+import {
   isUsageOverQuota,
   type RunUsage,
 } from "@/features/workflows/lib/run-quota"
@@ -435,11 +439,6 @@ function ActionsMenu({ workflowId }: { workflowId: string }) {
   )
 }
 
-// How long the run control waits for a run it just started to show up on the
-// realtime subscription. A healthy subscription reports it within a second or
-// two.
-const SETTLE_TIMEOUT_MS = 15_000
-
 // The header's run control: it starts a run of the current workflow, and while
 // that run is going it turns into the Stop button that cancels it.
 function RunControl({ workflowId }: { workflowId: string }) {
@@ -453,10 +452,14 @@ function RunControl({ workflowId }: { workflowId: string }) {
   // to report it, and without holding it the button would flash back to Run in
   // that gap — long enough to start a second run of the same workflow.
   const [startedId, setStartedId] = useState<string | null>(null)
-  const settling =
-    startedId !== null && !runs.some((run) => run.id === startedId)
 
-  const activeRunId = liveRun?.id ?? (settling ? startedId : null)
+  // Which run this button is holding, and whether it is still waiting on the
+  // subscription to confirm one it just started.
+  const { activeRunId, settling } = activeRunFor({
+    liveRunId: liveRun?.id,
+    startedId,
+    knownRunIds: runs.map((run) => run.id),
+  })
 
   // Held only until the subscription reports the run, and never for long: a
   // run that never shows up there (a dropped subscription, an expired token)
