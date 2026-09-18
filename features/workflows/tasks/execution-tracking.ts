@@ -6,6 +6,7 @@ import {
 } from "@/features/workflows/data"
 import type { ExecutionEvent } from "@/features/workflows/lib/execution-status"
 import type { RunWorkflowPayload } from "@/features/workflows/tasks/load-run-graph"
+import { redactSecrets } from "@/lib/redact"
 
 // Capped like a step's error, so one runaway message cannot bloat the row.
 const ERROR_CHAR_CAP = 2_000
@@ -27,13 +28,15 @@ export async function trackExecution(
       workflowId: payload.workflowId,
       versionId: payload.versionId,
       event,
+      // Redacted before it is capped, not after: cutting first could leave
+      // half a credential in the row, which is still a leak and no longer
+      // matches the shape that would have caught it.
       error:
         error === undefined
           ? undefined
-          : (error instanceof Error ? error.message : String(error)).slice(
-              0,
-              ERROR_CHAR_CAP
-            ),
+          : redactSecrets(
+              error instanceof Error ? error.message : String(error)
+            ).slice(0, ERROR_CHAR_CAP),
     })
   } catch (writeError) {
     Sentry.captureException(writeError, {
