@@ -17,6 +17,41 @@ documented here:
 https://docs.browserbase.com/platform/browser/observability/session-replay
 The retrieval needs the secret API key, so it must be proxied server-side.
 
+# Where code goes
+
+The structure here was arrived at by need, not by catalogue, and it holds. Keep
+new code landing in the same places:
+
+- **A rule that is pure and testable** goes in `features/<feature>/lib/` with its
+  test beside it — `run-quota.ts`, `validate-graph.ts`, `step-policies.ts`,
+  `webhook-signature.ts`. No I/O, no framework, no database.
+- **Orchestration gets extracted into a use case when a second caller appears,
+  not before.** `startWorkflowRun` is the model: it exists because the Run
+  button, a schedule and a webhook all needed the same steps. One caller does
+  not earn one.
+- **Persistence** goes in `features/<feature>/data.ts`. It is the only layer that
+  knows Drizzle, and the only plaintext boundary for anything the vault seals.
+- **A vendor** goes in `lib/`, built on first use so `next build` needs no
+  runtime secret. Put it behind a port **when something needs to replace or fake
+  it** — `BrowserPort` in the engine exists because the engine needed testing;
+  Resend has no port because nothing has needed one.
+- **Anything a request or a run writes down for a person to read later** passes
+  through `redactSecrets` first (see ADR 0012).
+- **Components** go in `features/<feature>/components/`. Split a component file
+  when it has more than one reason to change, not when it gets long: a panel
+  made of four small parts belongs in one file, and logic that decides something
+  belongs in `lib/` where it can be tested.
+
+Two rules that override the above, because they cost more than they look:
+
+1. **Do not rename the layers.** There is no `domain/`, `application/` or
+   `infrastructure/` folder, on purpose. The separation is real — `run-quota.ts`
+   does not import Drizzle, `run-steps.ts` does not know what Stagehand is — and
+   renaming it would churn every import to buy vocabulary.
+2. **Do not add indirection with one implementor.** No repository interface, no
+   DI container, no barrel files. The test seam is the module: tests mock
+   `@/features/workflows/data` whole, and that works.
+
 # Adding a workflow node
 
 Four edits, all under `features/workflows/nodes/`:
