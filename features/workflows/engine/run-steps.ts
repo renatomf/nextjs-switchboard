@@ -14,6 +14,7 @@ import {
 import type { NodeExecutor } from "@/features/workflows/nodes/node-executors"
 import type { NodeType } from "@/features/workflows/nodes/node-registry"
 import type { WorkflowGraph } from "@/lib/db/schema"
+import { redactSecrets } from "@/lib/redact"
 
 // One node's progress and result, published while the run is still going so
 // the canvas can follow along, and read by the run console once it is over.
@@ -106,7 +107,7 @@ const clampOutput = (output: unknown) => {
 // native binding), and it is exactly the case where losing the message leaves
 // the console with nothing to show.
 const messageOf = (error: unknown) =>
-  error instanceof Error ? error.message : String(error)
+  redactSecrets(error instanceof Error ? error.message : String(error))
 
 // The attempt's result, or a StepTimeoutError once its time is up. The attempt
 // itself is not stopped, since an executor has no way to be: it is left to
