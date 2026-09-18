@@ -415,7 +415,10 @@ function ActionsMenu({ workflowId }: { workflowId: string }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button size="icon" variant="ghost">
+        {/* An icon on its own says nothing to a screen reader, and nothing to
+            a test either: this button was reachable only by position until it
+            had a name. */}
+        <Button size="icon" variant="ghost" aria-label="Workflow actions">
           <MoreHorizontal />
         </Button>
       </DropdownMenuTrigger>
