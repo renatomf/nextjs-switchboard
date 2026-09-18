@@ -118,6 +118,39 @@ As decisões ficam em [`docs/adr/`](adr/).
 - [ ] Postmortem: o `metadata.set` que descartava updates por deep-equal
 - [ ] Documento "Como isso escala 100x"
 
+## Segurança — ordem de trabalho
+
+Levantada quando o cofre entrou em pauta, e registrada aqui porque **a ordem importa mais que a
+lista**. O critério não é gravidade em tese: é quanto risco cada item tira pelo esforço que custa,
+dado o que este projeto é hoje — uma organização, dados de teste, sem clientes.
+
+**Auditoria externa e pentest não estão na lista, e isso é deliberado.** Pentest vale quando já se
+acredita que o sistema está sólido e se quer olhos adversariais achando o que ninguém imaginou. Pagar
+alguém para listar o que já está escrito nos ADRs abaixo é comprar um relatório que nós mesmos
+escrevemos. Ele passa a fazer sentido quando houver dado de terceiro, cliente pagante ou exigência
+contratual — e aí vira requisito comercial, não só técnico.
+
+- [x] **Cofre de credenciais** — o segredo do webhook em claro no banco era a única exposição viva e
+      conhecida ([ADR 0011](adr/0011-cofre-de-credenciais.md))
+- [x] **Redigir mensagens de erro antes de gravar** — a mensagem carrega URL e token do request que
+      falhou, e ia inteira para a coluna `executions.error` e para a tela
+      ([ADR 0012](adr/0012-redacao-de-erros.md))
+- [ ] **Push protection no GitHub** — o secret scanning já está ligado e acusou um falso positivo em
+      minutos; falta o bloqueio. É o único controle que impede um segredo de **entrar** no histórico,
+      que é o problema sem conserto depois. Custa zero
+- [ ] **`npm audit` do CI em `high`, não só `critical`** — hoje qualquer alerta alto passa. É uma
+      palavra no `ci.yml`
+- [ ] **Separar desenvolvimento e produção em bancos distintos** — resolve três problemas de uma vez:
+      run de desenvolvimento consumindo a cota mensal de produção, a mesma `CREDENTIALS_KEY`
+      obrigatória dos dois lados, e um bug em dev escrevendo em linha de produção. É a mesma obra do
+      primeiro item da Fase E (branch do Neon por PR)
+- [ ] **Redigir também o que vai para o Sentry** — `captureException` leva a exceção original, com
+      `stack` e propriedades. `beforeSend` no SDK, ou scrubbing do lado do Sentry
+- [ ] **RLS com um papel sem `BYPASSRLS`** — por último de propósito. Hoje ligar RLS não teria efeito
+      nenhum: o app conecta como `neondb_owner`, que é dono das tabelas e tem bypass. Fazer direito
+      exige papel novo, policy por tabela e `SET LOCAL` do tenant em cada transação — e faz pouco
+      sentido antes de os bancos estarem separados
+
 ---
 
 ## Achados durante o caminho
