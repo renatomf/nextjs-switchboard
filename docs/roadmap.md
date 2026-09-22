@@ -126,6 +126,19 @@ As decisões ficam em [`docs/adr/`](adr/).
       citar uma duração que alguma run de fato levou
 - [ ] **Custo por execução** — pedido junto com as métricas acima e não entregue: nada registra
       duração de sessão da Browserbase nem contagem de tokens. Exige instrumentar antes de medir
+- [x] **Latência percebida, e não só duração de execução** — a métrica media
+      `started_at → finished_at`, dois carimbos que o próprio worker grava. Ela ignorava o tempo na
+      fila e a partida a frio da máquina: o primeiro relatório em produção mostrou **14 s** entre a
+      task começar e a primeira tentativa rodar, para 767 ms de trabalho. Quem clica em Run sente os
+      14 s; a métrica diria que não existiram. O relatório agora traz **três séries** sobre o mesmo
+      `created_at` que a tabela já guardava, sem migration: `execution` (o worker ocupado),
+      `perceived` (`created_at → finished_at`, o que a pessoa espera) e `wait`
+      (`created_at → started_at`, fila mais partida). A `wait` é medida como série própria, e **não**
+      subtraindo os percentis das outras duas, como esta linha dizia antes: a run que ocupa o
+      percentil 95 de uma série não é necessariamente a que ocupa o da outra, então a diferença
+      descreveria uma run que não existe — há teste que prova o caso (`p95` perceived − execution =
+      0 s enquanto uma run esperou 50 s). A `perceived` cobre mais runs que a `execution`, porque uma
+      run recusada antes de qualquer worker pegá-la também fez alguém esperar
 - [ ] **Alvos de SLO** — as métricas existem, os alvos não. Defini-los a partir das 55 execuções
       atuais cimentaria ruído: são majoritariamente de desenvolvimento e teste, incluindo falhas
       provocadas de propósito. Esperar dados de uso real

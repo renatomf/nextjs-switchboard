@@ -10,6 +10,12 @@ const WINDOW_DAYS = 7
 // that fires every few minutes would spend runs to say the same thing. Monday
 // morning, so the week starts with the week before it in view.
 //
+// The report carries three spans, not one. `execution` is the worker being
+// busy; `perceived` is the whole wait from clicking Run; `wait` is the queue
+// and cold start between them. The first production report showed 14 s of
+// waiting for 767 ms of work — reporting only `execution` would say those
+// seconds never happened.
+//
 // What this deliberately does not report is cost per execution — the roadmap
 // asks for it and nothing records it. A run opens a Browserbase session and
 // makes model calls, and neither duration nor token count reaches this
