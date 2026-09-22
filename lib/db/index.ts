@@ -4,6 +4,7 @@ import { attachDatabasePool } from "@vercel/functions"
 import { drizzle } from "drizzle-orm/node-postgres"
 import { Pool } from "pg"
 
+import { describeConnection } from "./connection-info"
 import * as schema from "./schema"
 
 // The pool is cached on globalThis so Next.js dev/HMR reloads reuse a single
@@ -39,6 +40,14 @@ export function getDb() {
     if (!url) {
       throw new Error("DATABASE_URL is not set")
     }
+
+    // Said once, on the first query of the process. Both the app and the
+    // Trigger.dev worker come through here with their own DATABASE_URL, and
+    // when the two point at different branches the symptom is a run failing
+    // to find data that plainly exists — which reads as a bug, not as
+    // configuration. Carries no credentials (see describeConnection).
+    const { endpoint, pooled } = describeConnection(url)
+    console.info(`[db] endpoint ${endpoint}${pooled ? " (pooled)" : ""}`)
 
     db = connect(url)
   }
