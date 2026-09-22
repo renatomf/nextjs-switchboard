@@ -14,12 +14,21 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty"
 
+// The prop is "retry", not "unstable_retry": it stabilised under the new name
+// in Next 16.3.0, and this project moved to 16.3.5. Nothing failed at build
+// time, because this component declares the shape it expects rather than
+// importing one from Next — so the code type-checked against a contract the
+// framework had stopped honouring, and the button threw only when someone in
+// trouble clicked it.
 export default function Error({
   error,
-  unstable_retry,
+  retry,
 }: {
   error: Error & { digest?: string }
-  unstable_retry: () => void
+  // Re-fetches and re-renders this boundary's children. Not reset(), which
+  // only clears the error state without fetching again — and what put us here
+  // was the server failing, so fetching again is the recovery.
+  retry: () => void
 }) {
   useEffect(() => {
     // Anything that reaches this boundary is unhandled by definition, so it
@@ -46,7 +55,7 @@ export default function Error({
         </EmptyDescription>
       </EmptyHeader>
       <EmptyContent>
-        <Button onClick={() => unstable_retry()}>
+        <Button onClick={() => retry()}>
           <RotateCw />
           Try again
         </Button>
