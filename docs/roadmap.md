@@ -126,6 +126,13 @@ As decisões ficam em [`docs/adr/`](adr/).
       citar uma duração que alguma run de fato levou
 - [ ] **Custo por execução** — pedido junto com as métricas acima e não entregue: nada registra
       duração de sessão da Browserbase nem contagem de tokens. Exige instrumentar antes de medir
+- [ ] **Latência percebida, e não só duração de execução** — a métrica atual mede
+      `started_at → finished_at`, dois carimbos que o próprio worker grava. Ela ignora o tempo na
+      fila e a partida a frio da máquina: o primeiro relatório em produção mostrou **14 s** entre a
+      task começar e a primeira tentativa rodar, para 767 ms de trabalho. Quem clica em Run sente os
+      14 s; a métrica diria que não existiram. A tabela já guarda `created_at`, o instante do
+      disparo, então medir `created_at → finished_at` em paralelo dá a latência percebida — e a
+      diferença entre as duas séries é exatamente o custo de fila mais partida
 - [ ] **Alvos de SLO** — as métricas existem, os alvos não. Defini-los a partir das 55 execuções
       atuais cimentaria ruído: são majoritariamente de desenvolvimento e teste, incluindo falhas
       provocadas de propósito. Esperar dados de uso real
