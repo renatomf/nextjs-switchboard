@@ -64,6 +64,13 @@
       "when": 1789601844353,
       "tag": "0008_bored_zarda",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1790116648311,
+      "tag": "0009_purple_titania",
+      "breakpoints": true
     }
   ]
 }

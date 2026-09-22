@@ -1,7 +1,9 @@
+import type { StagehandMetrics } from "@browserbasehq/stagehand"
 import * as Sentry from "@sentry/node"
 
 import {
   advanceExecution,
+  recordExecutionTokens,
   setExecutionBrowserSession,
 } from "@/features/workflows/data"
 import type { ExecutionEvent } from "@/features/workflows/lib/execution-status"
@@ -56,6 +58,37 @@ export async function trackBrowserSession(runId: string, sessionId: string) {
     Sentry.captureException(writeError, {
       tags: { area: "executions", event: "browser-session" },
       extra: { runId, sessionId },
+    })
+  }
+}
+
+// Records what the models consumed, read off the browser on its way out. Only
+// the instance knows: closing it takes the counts with it, so this is the last
+// moment to ask.
+//
+// Takes the reading as well as the write, so one failure is reported once and
+// in one place. Never throws, like the two above — the browser session's
+// beforeClose swallows what escapes anyway, and a run must not fail over
+// accounting. What it must not do is fail silently, hence the report: a count
+// that stops arriving is a number that quietly goes missing from every report
+// after it.
+export async function trackTokenUsage(
+  runId: string,
+  browser: { metrics: Promise<StagehandMetrics> }
+) {
+  try {
+    const metrics = await browser.metrics
+
+    await recordExecutionTokens(runId, {
+      promptTokens: metrics.totalPromptTokens,
+      completionTokens: metrics.totalCompletionTokens,
+      reasoningTokens: metrics.totalReasoningTokens,
+      cachedInputTokens: metrics.totalCachedInputTokens,
+    })
+  } catch (error) {
+    Sentry.captureException(error, {
+      tags: { area: "executions", event: "token-usage" },
+      extra: { runId },
     })
   }
 }

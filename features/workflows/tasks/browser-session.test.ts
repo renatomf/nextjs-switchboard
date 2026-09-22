@@ -122,4 +122,81 @@ describe("createBrowserSession", () => {
 
     await expect(session.release()).resolves.toBeUndefined()
   })
+  describe("the last look before closing", () => {
+    it("runs beforeClose while the browser is still open", async () => {
+      const order: string[] = []
+      const browser = {
+        close: vi.fn(async () => {
+          order.push("close")
+        }),
+      }
+      const session = createBrowserSession({
+        open: async () => browser,
+        signal: liveSignal(),
+        beforeClose: async () => {
+          order.push("beforeClose")
+        },
+      })
+
+      await session.get()
+      await session.release()
+
+      expect(order).toEqual(["beforeClose", "close"])
+    })
+
+    it("does not ask a browser that was never opened", async () => {
+      const beforeClose = vi.fn(async () => {})
+      const session = createBrowserSession({
+        open: async () => makeBrowser(),
+        signal: liveSignal(),
+        beforeClose,
+      })
+
+      await session.release()
+
+      expect(beforeClose).not.toHaveBeenCalled()
+    })
+
+    // The accounting is never worth a broken run, and never worth a session
+    // left open either.
+    it("closes the browser anyway when beforeClose fails", async () => {
+      const browser = makeBrowser()
+      const session = createBrowserSession({
+        open: async () => browser,
+        signal: liveSignal(),
+        beforeClose: async () => {
+          throw new Error("metrics unavailable")
+        },
+      })
+
+      await session.get()
+
+      await expect(session.release()).resolves.toBeUndefined()
+      expect(browser.close).toHaveBeenCalledTimes(1)
+    })
+
+    // A session bills by the second, so a callback that hangs must not be
+    // able to hold it open.
+    it("stops waiting on a beforeClose that hangs and closes regardless", async () => {
+      vi.useFakeTimers()
+      try {
+        const browser = makeBrowser()
+        const session = createBrowserSession({
+          open: async () => browser,
+          signal: liveSignal(),
+          beforeClose: () => new Promise<void>(() => {}),
+        })
+
+        await session.get()
+
+        const released = session.release()
+        await vi.advanceTimersByTimeAsync(10_000)
+        await released
+
+        expect(browser.close).toHaveBeenCalledTimes(1)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+  })
 })

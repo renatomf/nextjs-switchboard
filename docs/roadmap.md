@@ -124,8 +124,20 @@ As decisões ficam em [`docs/adr/`](adr/).
       relatados semanalmente por uma task agendada. O cancelamento fica fora do denominador — é
       alguém clicando Stop, não a plataforma falhando. Percentil pelo vizinho mais próximo, para
       citar uma duração que alguma run de fato levou
-- [ ] **Custo por execução** — pedido junto com as métricas acima e não entregue: nada registra
-      duração de sessão da Browserbase nem contagem de tokens. Exige instrumentar antes de medir
+- [ ] **Custo por execução** — pedido junto com as métricas acima. Dividido em dois, porque as duas
+      metades têm urgências diferentes: instrumentação não se apura depois, e cada run que roda sem
+      ela é um custo perdido para sempre, enquanto a conversão em dinheiro pode esperar e fica
+      melhor esperando
+  - [x] **Gravar** — cinco colunas anuláveis em `executions`: quatro contagens de token, lidas da
+        instância do Stagehand num gancho `beforeClose` (é o último instante em que existem), e os
+        segundos de sessão, coletados depois pela varredura de 15 minutos. A duração vem da
+        Browserbase e não do relógio do worker, porque uma sessão órfã segue cobrando depois que o
+        worker morre — medir localmente subestimaria justamente o caso mais caro. A contabilidade
+        tem tempo limite e engole a própria falha: um erro ali substituiria o erro que a run de fato
+        teve ([ADR 0013](adr/0013-medicao-de-custo-por-execucao.md))
+  - [ ] **Converter** — `run-cost.ts` puro com as tarifas como parâmetro, e a linha no relatório
+        semanal. Depois de propósito, para conferir as tarifas contra dados já gravados em vez de
+        contra uma planilha de preços
 - [x] **Latência percebida, e não só duração de execução** — a métrica media
       `started_at → finished_at`, dois carimbos que o próprio worker grava. Ela ignorava o tempo na
       fila e a partida a frio da máquina: o primeiro relatório em produção mostrou **14 s** entre a
