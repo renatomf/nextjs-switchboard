@@ -32,6 +32,19 @@ export default defineConfig({
   reporter: process.env.CI ? "github" : "list",
   use: {
     baseURL,
+    // Preview deployments sit behind Vercel's deployment protection, which
+    // answers an automated request with a redirect to a login page — every
+    // test would fail at the sign-in step, for a reason that has nothing to do
+    // with this app. The bypass secret is sent on every request instead of
+    // turning the protection off: a preview carries a copy of production data.
+    ...(process.env.VERCEL_AUTOMATION_BYPASS_SECRET
+      ? {
+          extraHTTPHeaders: {
+            "x-vercel-protection-bypass":
+              process.env.VERCEL_AUTOMATION_BYPASS_SECRET,
+          },
+        }
+      : {}),
     // Kept only for a failure, where it is the difference between "it broke"
     // and knowing which step broke it.
     trace: "on-first-retry",
