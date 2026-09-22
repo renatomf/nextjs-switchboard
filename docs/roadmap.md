@@ -121,7 +121,10 @@ As decisões ficam em [`docs/adr/`](adr/).
       **executar** um. Rodar de verdade no CI abriria navegador e chamaria modelo a cada PR
 - [ ] Deploy de produção real (Clerk de produção, domínio na Resend, chave própria do modelo)
 - [ ] Métricas e SLOs: taxa de sucesso, p95 de duração, custo por execução
-- [ ] Postmortem: o `metadata.set` que descartava updates por deep-equal
+- [x] Postmortem: as atualizações de etapa que sumiam a caminho do canvas — dois defeitos
+      silenciosos na fronteira com o Trigger.dev, reconstruído a partir dos comentários do código
+      porque o commit da correção não registrou nada
+      ([postmortem](postmortems/2026-09-06-metadata-set-descartado.md))
 - [ ] Documento "Como isso escala 100x"
 
 ## Segurança — ordem de trabalho
