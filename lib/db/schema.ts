@@ -106,6 +106,27 @@ export const executions = pgTable(
     browserbaseSessionId: text("browserbase_session_id"),
     // The message of whatever failed the run.
     error: text("error"),
+    // What the run consumed, in the quantities a bill is made of rather than
+    // in money. Prices change, so a stored amount would freeze a number that
+    // cannot be recomputed from the row; these can be priced again whenever
+    // the rates move.
+    //
+    // All null until recorded, and null for good on a run that never called a
+    // model or never opened a browser. Recorded separately because they are
+    // known at different moments: the tokens while the run still holds the
+    // session, the seconds only once Browserbase has closed it.
+    //
+    // Cached input is its own count because it is billed at its own rate, and
+    // reasoning because a model that reasons bills it as output.
+    promptTokens: integer("prompt_tokens"),
+    completionTokens: integer("completion_tokens"),
+    reasoningTokens: integer("reasoning_tokens"),
+    cachedInputTokens: integer("cached_input_tokens"),
+    // How long Browserbase kept the session open, which is what it charges
+    // for. Read back from the session rather than timed by this worker: a
+    // session the worker lost stays open, and billed, until Browserbase times
+    // it out, and the worker's clock would miss exactly that.
+    sessionSeconds: integer("session_seconds"),
     createdAt: timestamptz("created_at").defaultNow().notNull(),
     startedAt: timestamptz("started_at"),
     finishedAt: timestamptz("finished_at"),

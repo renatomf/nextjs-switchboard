@@ -1,4 +1,15 @@
-import { and, count, desc, eq, gte, inArray, lt, sql } from "drizzle-orm"
+import {
+  and,
+  count,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  sql,
+} from "drizzle-orm"
 
 import { getDb } from "@/lib/db"
 import {
@@ -218,6 +229,58 @@ export async function countOrgRunsSince(orgId: string, since: Date) {
     .where(and(eq(executions.orgId, orgId), gte(executions.createdAt, since)))
 
   return value
+}
+
+// What the models consumed on this run, written once on the way out while the
+// run still holds the session. A plain update: the row exists by now, and a
+// run that ends before any model call leaves the counts null.
+export async function recordExecutionTokens(
+  runId: string,
+  tokens: {
+    promptTokens: number
+    completionTokens: number
+    reasoningTokens: number
+    cachedInputTokens: number
+  }
+) {
+  await getDb()
+    .update(executions)
+    .set(tokens)
+    .where(eq(executions.runId, runId))
+}
+
+// Executions that opened a browser session and have no duration recorded for
+// it yet, oldest first so the longest-waiting is collected before a newer one.
+// Settled only: a session belonging to a run still going has not been closed,
+// so Browserbase has no end for it to report.
+export function listExecutionsMissingSessionSeconds(limit: number) {
+  return getDb()
+    .select({
+      runId: executions.runId,
+      browserbaseSessionId: executions.browserbaseSessionId,
+    })
+    .from(executions)
+    .where(
+      and(
+        isNotNull(executions.browserbaseSessionId),
+        isNull(executions.sessionSeconds),
+        inArray(executions.status, ["succeeded", "failed", "cancelled"])
+      )
+    )
+    .orderBy(executions.createdAt)
+    .limit(limit)
+}
+
+// How long Browserbase had the session open. Written after the fact by the
+// sweep, which is the first moment the session has an end to report.
+export async function recordExecutionSessionSeconds(
+  runId: string,
+  sessionSeconds: number
+) {
+  await getDb()
+    .update(executions)
+    .set({ sessionSeconds })
+    .where(eq(executions.runId, runId))
 }
 
 export async function setExecutionBrowserSession(

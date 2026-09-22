@@ -22,6 +22,7 @@ import {
 import {
   trackBrowserSession,
   trackExecution,
+  trackTokenUsage,
 } from "@/features/workflows/tasks/execution-tracking"
 
 // The steps go out through the run's metadata, which the canvas and the run
@@ -154,7 +155,17 @@ export const runWorkflowTask = task({
     // The run owns one Browserbase session: opened on the first browser step,
     // reused by every later one so the recording spans the whole flow, and
     // released on the way out or the moment the run is cancelled.
-    const browser = createBrowserSession({ open: openStagehand, signal })
+    //
+    // beforeClose is the last moment the token counts can be had: they live on
+    // the Stagehand instance, and closing it takes them with it. What it costs
+    // Browserbase to have held the session is not known yet — the session has
+    // no end until this close lands — so that half is collected later, by the
+    // sweep.
+    const browser = createBrowserSession({
+      open: openStagehand,
+      signal,
+      beforeClose: (stagehand) => trackTokenUsage(ctx.run.id, stagehand),
+    })
 
     const { steps, outputs } = await runSteps({
       runId: ctx.run.id,
