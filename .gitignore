@@ -30,6 +30,8 @@ pnpm-debug.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# ...except the one that documents them, which carries names and no values.
+!.env.example
 
 # typescript
 *.tsbuildinfo
