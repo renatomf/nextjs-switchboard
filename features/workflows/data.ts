@@ -197,6 +197,10 @@ export function listExecutionsSince(since: Date) {
   return getDb()
     .select({
       status: executions.status,
+      // The instant the run was asked for, which the window already filters
+      // on. Selected too, because the wait before a worker picks the run up
+      // is part of what someone clicking Run experiences.
+      createdAt: executions.createdAt,
       startedAt: executions.startedAt,
       finishedAt: executions.finishedAt,
     })

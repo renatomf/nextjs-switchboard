@@ -3,11 +3,24 @@
 // below are testable without a database.
 
 // Only the fields the numbers need. A row carries more, and none of it
-// belongs in this decision.
+// belongs in this decision. `createdAt` is never null — the row is written
+// with it — while the other two are only known once the run gets that far.
 export type SettledExecution = {
   status: string
+  createdAt: Date
   startedAt: Date | null
   finishedAt: Date | null
+}
+
+// One span, measured over whatever population could report it.
+export type DurationSummary = {
+  // How many rows could be measured, which is the population the percentiles
+  // describe. Reported so a percentile from three runs is not read as one
+  // from three hundred — and so the three spans below can be compared
+  // knowing they do not cover the same runs.
+  timed: number
+  p50Seconds: number | null
+  p95Seconds: number | null
 }
 
 export type RunMetrics = {
@@ -20,12 +33,17 @@ export type RunMetrics = {
   // null rather than 0 when there is nothing to measure: no runs and all runs
   // failing are different facts, and a rate of zero says the second.
   successRate: number | null
-  // How many had both timestamps, which is the population the durations
-  // describe. Reported so a percentile from three runs is not read as one
-  // from three hundred.
-  timed: number
-  p50Seconds: number | null
-  p95Seconds: number | null
+  // How long the worker was busy. What the platform does.
+  execution: DurationSummary
+  // How long the person waited, from clicking Run to the run ending. What the
+  // person gets. Wider than `execution`: a run rejected before any worker
+  // picked it up still made someone wait.
+  perceived: DurationSummary
+  // The gap between the two — queue time plus cold start. Measured directly
+  // rather than by subtracting the percentiles above, because the run sitting
+  // at the 95th of one series need not be the run at the 95th of another, so
+  // the difference of two percentiles describes no run at all.
+  wait: DurationSummary
 }
 
 const SUCCEEDED = "succeeded"
@@ -45,17 +63,31 @@ function percentileOf(sorted: number[], fraction: number): number | null {
   return sorted[rank - 1]
 }
 
-// How long a run took, or nothing when the row cannot say. A finish before its
-// start is a broken record — clocks disagree across machines — and averaging
-// it in would drag the number somewhere no run ever was.
-function secondsOf(execution: SettledExecution): number | null {
-  const { startedAt, finishedAt } = execution
+// The seconds between two stamps, or nothing when the row cannot say. An end
+// before its beginning is a broken record — clocks disagree across machines —
+// and averaging it in would drag the number somewhere no run ever was.
+function secondsBetween(from: Date | null, to: Date | null): number | null {
+  if (!from || !to) return null
 
-  if (!startedAt || !finishedAt) return null
-
-  const seconds = (finishedAt.getTime() - startedAt.getTime()) / 1000
+  const seconds = (to.getTime() - from.getTime()) / 1000
 
   return seconds < 0 ? null : Math.round(seconds)
+}
+
+function summariseSpan(
+  executions: SettledExecution[],
+  span: (execution: SettledExecution) => number | null
+): DurationSummary {
+  const seconds = executions
+    .map(span)
+    .filter((value): value is number => value !== null)
+    .sort((a, b) => a - b)
+
+  return {
+    timed: seconds.length,
+    p50Seconds: percentileOf(seconds, 0.5),
+    p95Seconds: percentileOf(seconds, 0.95),
+  }
 }
 
 export function summariseRuns(executions: SettledExecution[]): RunMetrics {
@@ -69,11 +101,6 @@ export function summariseRuns(executions: SettledExecution[]): RunMetrics {
   // so it counts — a rate that quietly ignores the unfamiliar flatters itself.
   const attempted = executions.length - cancelled
 
-  const durations = executions
-    .map(secondsOf)
-    .filter((seconds): seconds is number => seconds !== null)
-    .sort((a, b) => a - b)
-
   return {
     total: executions.length,
     succeeded,
@@ -81,8 +108,14 @@ export function summariseRuns(executions: SettledExecution[]): RunMetrics {
     cancelled,
     attempted,
     successRate: attempted === 0 ? null : succeeded / attempted,
-    timed: durations.length,
-    p50Seconds: percentileOf(durations, 0.5),
-    p95Seconds: percentileOf(durations, 0.95),
+    execution: summariseSpan(executions, (e) =>
+      secondsBetween(e.startedAt, e.finishedAt)
+    ),
+    perceived: summariseSpan(executions, (e) =>
+      secondsBetween(e.createdAt, e.finishedAt)
+    ),
+    wait: summariseSpan(executions, (e) =>
+      secondsBetween(e.createdAt, e.startedAt)
+    ),
   }
 }
