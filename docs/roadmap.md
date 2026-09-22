@@ -110,9 +110,15 @@ As decisões ficam em [`docs/adr/`](adr/).
 
 ## Fase E — Evidência de produção
 
-- [ ] Preview por PR: deploy de preview na Vercel + branch do Neon por PR. Veio da antiga A.4:
-      depende de configurar os painéis da Vercel e do Neon e de chaves por ambiente, que esta fase monta
-- [ ] E2E com Playwright + Clerk testing, usando executor fake
+- [x] Preview por PR: app na Vercel, com a integração Neon criando uma branch de banco por preview
+      (`preview/<branch>`) e apagando-a quando a branch do Git some. As duas variáveis do banco
+      passam a pertencer à integração — defini-las à mão na Vercel as sobrescreveria
+- [x] E2E com Playwright + Clerk testing: login programático pelo backend do Clerk, organização de
+      teste ativada pelo cliente do Clerk (e não pelo menu dele, cujo DOM não é contrato nosso), e
+      estado de sessão salvo uma vez. Roda no CI a cada preview, atravessando a proteção da Vercel
+      por cabeçalho de bypass
+- [ ] Executor fake para o E2E: os testes cobrem login, dashboard e criar/apagar workflow, mas não
+      **executar** um. Rodar de verdade no CI abriria navegador e chamaria modelo a cada PR
 - [ ] Deploy de produção real (Clerk de produção, domínio na Resend, chave própria do modelo)
 - [ ] Métricas e SLOs: taxa de sucesso, p95 de duração, custo por execução
 - [ ] Postmortem: o `metadata.set` que descartava updates por deep-equal
@@ -138,9 +144,11 @@ contratual — e aí vira requisito comercial, não só técnico.
 - [ ] **Push protection no GitHub** — o secret scanning já está ligado e acusou um falso positivo em
       minutos; falta o bloqueio. É o único controle que impede um segredo de **entrar** no histórico,
       que é o problema sem conserto depois. Custa zero
-- [ ] **`npm audit` do CI em `high`, não só `critical`** — hoje qualquer alerta alto passa. É uma
-      palavra no `ci.yml`
-- [ ] **Separar desenvolvimento e produção em bancos distintos** — resolve três problemas de uma vez:
+- [ ] **`npm audit` do CI em `high`, não só `critical`** — hoje qualquer alerta alto passa.
+      **Não é uma palavra no `ci.yml`, como esta linha dizia antes:** medido em 18/09, tanto
+      `--audit-level=high --omit=dev` quanto `moderate --omit=dev` falham — existem alertas altos
+      em dependências de produção. Subir o portão exige antes triar esses alertas
+- [x] **Separar desenvolvimento e produção em bancos distintos** — resolve três problemas de uma vez:
       run de desenvolvimento consumindo a cota mensal de produção, a mesma `CREDENTIALS_KEY`
       obrigatória dos dois lados, e um bug em dev escrevendo em linha de produção. É a mesma obra do
       primeiro item da Fase E (branch do Neon por PR)
@@ -197,4 +205,6 @@ bloco `current gaps` do arquivo de teste correspondente.
 | A tabela `webhook_calls` só cresce: o limite de frequência deixa uma linha por workflow e por janela de um minuto, e nada apaga as janelas que já passaram. Um workflow chamado o dia inteiro deixa 1.440 linhas por dia | `webhook_calls`, `data.ts` | 🟡 | Apagar as janelas antigas cabe na varredura da C.5, que já roda a cada 15 minutos |
 | O `Sentry.captureException` leva a exceção original, sem a redação do [ADR 0012](adr/0012-redacao-de-erros.md): o erro inteiro vai com `stack` e propriedades. A redação cobre a coluna `executions.error` e o erro do passo, que são outros caminhos | `execution-tracking.ts`, `run-steps.ts`, SDK do Sentry | 🟡 | Redigir no `beforeSend` do SDK, ou usar o scrubbing do lado do Sentry. Decisão ainda não tomada |
 | RLS está desligada nas seis tabelas e não existe policy nenhuma. Mais relevante: o app conecta como `neondb_owner`, que é **dono** das tabelas e tem `rolbypassrls`, então ligar RLS sem trocar o papel não teria efeito nenhum — o painel mostraria "enabled" e o app continuaria lendo tudo | Neon, `lib/db` | 🟡 | A separação entre organizações hoje é o escopo por `orgId`, centralizado no `data.ts`. RLS de verdade exige papel sem `BYPASSRLS` e que não seja dono, mais `SET LOCAL` do tenant por transação. Fica depois de separar dev e prod |
-| Desenvolvimento e produção dividem o mesmo banco. Consequências já observadas: uma run de desenvolvimento consome a cota mensal de produção, a `CREDENTIALS_KEY` precisa ser a mesma dos dois lados para uma linha selada de um abrir no outro, e um bug em dev escreve em linhas de produção | Neon, `.env.local`, Railway | 🟡 | Separar os bancos é o passo que resolve os três de uma vez. Encosta na fase E (preview por PR com branch do Neon) |
+| ~~Desenvolvimento e produção dividem o mesmo banco: uma run de desenvolvimento consome a cota mensal de produção, a `CREDENTIALS_KEY` precisa ser a mesma dos dois lados, e um bug em dev escreve em linhas de produção~~ | Neon, `.env.local` | ✅ | Resolvido: branch `dev` do Neon, com o `.env.local` apontando para ela. Provado nos dois sentidos — uma run local moveu a contagem da `dev` e não a da produção, e uma run em produção não moveu a da `dev`. Dois erros no caminho valem registro: editar o `.env.local` não alcança processo já em execução, e o app e o worker podem acabar em bancos diferentes, cujo sintoma foi `"Workflow version ... not found"` |
+| Existem **duas produções no ar** apontando para a mesma branch `main` do Neon: a da Railway e a da Vercel. Nada quebra — mas a URL do webhook que está em uso é a da Railway, e os agendamentos não distinguem uma da outra | Railway, Vercel | 🟡 | Escolher uma e aposentar a outra, com a mesma sequência do domínio: subir, testar, migrar quem chama, desligar |
+| A integração do Neon define as URLs do banco com `sslmode=require`, e não `verify-full` — a conexão é criptografada, mas o certificado e o host não são validados. As variáveis pertencem à integração, então editá-las à mão é sobrescrito no próximo deploy | Vercel, integração Neon | 🟡 | Decidir no deploy de produção real: aceitar o `require` gerido pela integração, ou variáveis próprias e abrir mão do banco por preview |
