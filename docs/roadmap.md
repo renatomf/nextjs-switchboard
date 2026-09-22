@@ -141,19 +141,42 @@ contratual — e aí vira requisito comercial, não só técnico.
 - [x] **Redigir mensagens de erro antes de gravar** — a mensagem carrega URL e token do request que
       falhou, e ia inteira para a coluna `executions.error` e para a tela
       ([ADR 0012](adr/0012-redacao-de-erros.md))
-- [ ] **Push protection no GitHub** — o secret scanning já está ligado e acusou um falso positivo em
+- [x] **Push protection no GitHub** — o secret scanning já está ligado e acusou um falso positivo em
       minutos; falta o bloqueio. É o único controle que impede um segredo de **entrar** no histórico,
       que é o problema sem conserto depois. Custa zero
-- [ ] **`npm audit` do CI em `high`, não só `critical`** — hoje qualquer alerta alto passa.
-      **Não é uma palavra no `ci.yml`, como esta linha dizia antes:** medido em 18/09, tanto
-      `--audit-level=high --omit=dev` quanto `moderate --omit=dev` falham — existem alertas altos
-      em dependências de produção. Subir o portão exige antes triar esses alertas
+- [ ] **Portão do `npm audit` acima de `critical`** — triado em 22/09, e a conclusão é que **não se
+      sobe o nível do jeito simples**. Em dependências de produção há 0 críticas e **6 altas**, e
+      nenhuma tem correção publicada:
+
+      - **quatro** são a cadeia do `metro` (bundler do React Native), que chega por
+        `@clerk/ui → carteiras Solana → react-native`. É código que este app nunca carrega;
+      - **`ws`** está sob `engine.io-client@6.5.4`, que fixa `~8.17.1` de propósito. O `ws` de
+        primeiro nível já é 8.21.3, fora da faixa. Tentamos um `overrides` aninhado e o npm não o
+        aplicou — só valeria regenerando o lockfile inteiro, e ainda assim passando por cima de um
+        til deliberado do mantenedor;
+        - **`undici`** vem do provedor Amazon Bedrock que o Stagehand traz opcionalmente e não é usado.
+
+      Subir para `high` faria o portão falhar em toda execução, para sempre. Um portão que sempre
+      falha é um portão que alguém desliga — e aí se perde também a proteção contra críticas.
+
+      **A lacuna real que fica:** uma alta **nova**, num pacote que o app de fato usa, não quebraria
+      o build. O controle que compensa é o **Dependabot alerts**, que avisa por alerta independente
+      da severidade (foi ele que abriu o #45).
+
+      **A solução, quando valer a pena:** trocar o `npm audit` puro por uma ferramenta com lista de
+      aceitos (`audit-ci`, `better-npm-audit`) — falha em qualquer alta nova, exceto as documentadas
+      acima. O custo é uma dependência a mais e uma lista que precisa de revisão periódica, senão
+      vira carimbo. Vale quando houver mais gente no projeto, porque aí "alguém nota o alerta" deixa
+      de ser garantia
 - [x] **Separar desenvolvimento e produção em bancos distintos** — resolve três problemas de uma vez:
       run de desenvolvimento consumindo a cota mensal de produção, a mesma `CREDENTIALS_KEY`
       obrigatória dos dois lados, e um bug em dev escrevendo em linha de produção. É a mesma obra do
       primeiro item da Fase E (branch do Neon por PR)
-- [ ] **Redigir também o que vai para o Sentry** — `captureException` leva a exceção original, com
-      `stack` e propriedades. `beforeSend` no SDK, ou scrubbing do lado do Sentry
+- [x] **Redigir também o que vai para o Sentry** — feito em `lib/redact-event.ts`, ligado nos quatro
+      runtimes. Duas regras: pela forma do valor (o `redactSecrets` que já existia) e pelo nome do
+      campo, que é a metade que pega a chave-mestra do cofre — base64 puro, sem prefixo a reconhecer.
+      Importa porque o servidor usa `includeLocalVariables`, que põe valores de variáveis locais nos
+      frames da pilha
 - [ ] **RLS com um papel sem `BYPASSRLS`** — por último de propósito. Hoje ligar RLS não teria efeito
       nenhum: o app conecta como `neondb_owner`, que é dono das tabelas e tem bypass. Fazer direito
       exige papel novo, policy por tabela e `SET LOCAL` do tenant em cada transação — e faz pouco
@@ -208,3 +231,4 @@ bloco `current gaps` do arquivo de teste correspondente.
 | ~~Desenvolvimento e produção dividem o mesmo banco: uma run de desenvolvimento consome a cota mensal de produção, a `CREDENTIALS_KEY` precisa ser a mesma dos dois lados, e um bug em dev escreve em linhas de produção~~ | Neon, `.env.local` | ✅ | Resolvido: branch `dev` do Neon, com o `.env.local` apontando para ela. Provado nos dois sentidos — uma run local moveu a contagem da `dev` e não a da produção, e uma run em produção não moveu a da `dev`. Dois erros no caminho valem registro: editar o `.env.local` não alcança processo já em execução, e o app e o worker podem acabar em bancos diferentes, cujo sintoma foi `"Workflow version ... not found"` |
 | Existem **duas produções no ar** apontando para a mesma branch `main` do Neon: a da Railway e a da Vercel. Nada quebra — mas a URL do webhook que está em uso é a da Railway, e os agendamentos não distinguem uma da outra | Railway, Vercel | 🟡 | Escolher uma e aposentar a outra, com a mesma sequência do domínio: subir, testar, migrar quem chama, desligar |
 | A integração do Neon define as URLs do banco com `sslmode=require`, e não `verify-full` — a conexão é criptografada, mas o certificado e o host não são validados. As variáveis pertencem à integração, então editá-las à mão é sobrescrito no próximo deploy | Vercel, integração Neon | 🟡 | Decidir no deploy de produção real: aceitar o `require` gerido pela integração, ou variáveis próprias e abrir mão do banco por preview |
+| Branches de preview no Trigger.dev exigem plano pago (Free = 0). Sem elas, o escopo Preview da Vercel aponta para o ambiente de **produção** do Trigger — uma run disparada de um preview criaria a versão no banco do preview e o worker de produção a procuraria no banco de produção | Trigger.dev, Vercel | 🟡 | Aceito: falha de forma ruidosa e inofensiva (`Workflow version ... not found`), e os testes E2E não executam workflows. Resolver exige plano pago mais `TRIGGER_PREVIEW_BRANCH` por deploy |
