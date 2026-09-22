@@ -12,8 +12,9 @@ export type SettledExecution = {
   finishedAt: Date | null
 }
 
-// One span, measured over whatever population could report it.
-export type DurationSummary = {
+// One span, measured over whatever population could report it. Not exported:
+// a caller reads the spans off RunMetrics and never needs to name this.
+type DurationSummary = {
   // How many rows could be measured, which is the population the percentiles
   // describe. Reported so a percentile from three runs is not read as one
   // from three hundred — and so the three spans below can be compared
