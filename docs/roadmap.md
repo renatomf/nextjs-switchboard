@@ -120,7 +120,15 @@ As decisões ficam em [`docs/adr/`](adr/).
 - [ ] Executor fake para o E2E: os testes cobrem login, dashboard e criar/apagar workflow, mas não
       **executar** um. Rodar de verdade no CI abriria navegador e chamaria modelo a cada PR
 - [ ] Deploy de produção real (Clerk de produção, domínio na Resend, chave própria do modelo)
-- [ ] Métricas e SLOs: taxa de sucesso, p95 de duração, custo por execução
+- [x] Métricas: taxa de sucesso e percentis de duração, calculados em `run-metrics.ts` e
+      relatados semanalmente por uma task agendada. O cancelamento fica fora do denominador — é
+      alguém clicando Stop, não a plataforma falhando. Percentil pelo vizinho mais próximo, para
+      citar uma duração que alguma run de fato levou
+- [ ] **Custo por execução** — pedido junto com as métricas acima e não entregue: nada registra
+      duração de sessão da Browserbase nem contagem de tokens. Exige instrumentar antes de medir
+- [ ] **Alvos de SLO** — as métricas existem, os alvos não. Defini-los a partir das 55 execuções
+      atuais cimentaria ruído: são majoritariamente de desenvolvimento e teste, incluindo falhas
+      provocadas de propósito. Esperar dados de uso real
 - [x] Postmortem: as atualizações de etapa que sumiam a caminho do canvas — dois defeitos
       silenciosos na fronteira com o Trigger.dev, reconstruído a partir dos comentários do código
       porque o commit da correção não registrou nada
