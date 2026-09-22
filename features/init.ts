@@ -1,6 +1,8 @@
 import * as Sentry from "@sentry/node"
 import { tasks } from "@trigger.dev/sdk"
 
+import { redactEvent } from "@/lib/redact-event"
+
 // Trigger.dev auto-loads an `init.ts` at the root of a configured task dir
 // (`dirs: ["features"]`) before any task runs. It is the documented place for
 // global lifecycle hooks, and the only place a task worker can be wired up:
@@ -10,6 +12,10 @@ import { tasks } from "@trigger.dev/sdk"
 // https://trigger.dev/docs/tasks/overview#global-lifecycle-hooks
 
 Sentry.init({
+  // Cleaned on the way out, like the three Next configs. Here the payload and
+  // ctx handed to captureException below are the widest surface.
+  beforeSend: (event) => redactEvent(event),
+
   // Trigger runs its own OpenTelemetry SDK for the run traces in its dashboard.
   // The default integrations install a second one plus a set of auto-
   // instrumentations, and the two fight over the same global provider — errors

@@ -4,7 +4,19 @@
 
 import * as Sentry from "@sentry/nextjs"
 
+import { redactEvent } from "@/lib/redact-event"
+
 Sentry.init({
+  // Everything on its way to Sentry is cleaned first. Sentry is the one sink
+  // outside this infrastructure, and the server config asks for local
+  // variables on stack frames — which in this code base means a plaintext
+  // webhook secret and the vault master key can ride along.
+  beforeSend: (event) => redactEvent(event),
+  // Logs and transactions are separate ways out: a Sentry.logger.* call
+  // carries whatever it was handed, and a transaction carries the URL.
+  beforeSendLog: (log) => redactEvent(log),
+  beforeSendTransaction: (event) => redactEvent(event),
+
   // Env first, literal as the fallback. The literal is what keeps the SDK
   // working if the variable is ever missing — a DSN is not a secret, it only
   // says which project to ingest into.
