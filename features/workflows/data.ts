@@ -190,6 +190,20 @@ export function listUnsettledExecutions({
     .limit(limit)
 }
 
+// Every execution recorded since a point in time, with only the columns the
+// metrics need. Across every org: this is the platform measuring itself, not
+// one organisation asking about its own runs.
+export function listExecutionsSince(since: Date) {
+  return getDb()
+    .select({
+      status: executions.status,
+      startedAt: executions.startedAt,
+      finishedAt: executions.finishedAt,
+    })
+    .from(executions)
+    .where(gte(executions.createdAt, since))
+}
+
 // How many runs an org has started since a point in time, whatever became of
 // them: a run that failed still opened a session and called a model. What the
 // monthly quota is counted against.
