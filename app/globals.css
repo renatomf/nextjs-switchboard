@@ -135,3 +135,31 @@
     cursor: pointer !important;
   }
 }
+/* Liveblocks avatar stack, on the canvas.
+ *
+ * The stack draws no border. It overlaps the avatars and then masks a notch
+ * out of each one with a radial gradient, so the avatar behind shows through
+ * the gap. The package's mask fades over 0.375px — a hair — which aliases on
+ * fractional device pixel ratios and reads as a broken, chewed-looking edge
+ * rather than a clean cut.
+ *
+ * Two changes: widen that fade so the cut is smooth, and give each avatar a
+ * soft ring of its own. The ring is inset because the mask clips anything
+ * drawn outside the box, so an outer shadow would be eaten by the same notch.
+ */
+.lb-avatar-stack {
+  --lb-avatar-stack-gap: 3px;
+}
+
+.lb-avatar-stack .lb-avatar-stack-avatar {
+  box-shadow: inset 0 0 0 1.5px color-mix(in oklab, var(--border) 85%, transparent);
+}
+
+.lb-avatar-stack .lb-avatar-stack-avatar:not(:first-child) {
+  mask-image: radial-gradient(
+    circle at
+      calc(var(--lb-avatar-stack-overlap) - var(--lb-avatar-stack-size) / 2) 50%,
+    transparent var(--lb-avatar-stack-mask-size),
+    black calc(var(--lb-avatar-stack-mask-size) + 1.25px)
+  );
+}

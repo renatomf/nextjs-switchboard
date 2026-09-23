@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import * as Sentry from "@sentry/nextjs"
-import { CalendarClock, Lock } from "lucide-react"
+import { CalendarClock, ChevronDown, Lock } from "lucide-react"
 import { useReactFlow } from "@xyflow/react"
 import { toast } from "sonner"
 
@@ -45,15 +45,40 @@ const twoDigits = (value: number) => String(value).padStart(2, "0")
 
 // A native select, dressed like the Input beside it. The app has no Select
 // component, and a native one is accessible and works as it should on a phone.
+//
+// The options need colouring of their own. The browser draws the open list
+// itself and takes its background from the select's, which is transparent
+// here so the closed control sits flat on the panel — and a transparent
+// background paints the popup white, in dark mode too. Setting it on the
+// select instead would tint the closed control; setting it on the options
+// reaches only the part that is wrong.
+//
+// They take the panel's own background rather than the popover token, so the
+// open list reads as part of the sidebar instead of a darker sheet floating
+// over it. That is also what the closed control shows: its dark tint is
+// --input at 30%, and --input is already white at 15%, so what you see is
+// the panel with a whisper on top.
 function NativeSelect({ className, ...props }: React.ComponentProps<"select">) {
   return (
-    <select
-      className={cn(
-        "h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50 md:text-sm dark:bg-input/30",
-        className
-      )}
-      {...props}
-    />
+    // The caret is ours, not the browser's. A UA arrow sits hard against the
+    // right edge and ignores the padding, so it never lined up with the clock
+    // in the time field beside it — that one is inset by the Input's own
+    // px-2.5. Dropping appearance and drawing the chevron at the same 2.5
+    // puts the two on one vertical line.
+    <div className="relative w-full min-w-0">
+      <select
+        className={cn(
+          "h-8 w-full min-w-0 appearance-none rounded-lg border border-input bg-transparent py-1 pr-7 pl-2.5 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50 md:text-sm dark:bg-input/30",
+          "[&>option]:bg-background [&>option]:text-foreground",
+          className
+        )}
+        {...props}
+      />
+      <ChevronDown
+        aria-hidden
+        className="pointer-events-none absolute top-1/2 right-2.5 size-3.5 -translate-y-1/2 opacity-50"
+      />
+    </div>
   )
 }
 
