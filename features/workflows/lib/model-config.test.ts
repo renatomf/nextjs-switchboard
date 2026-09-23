@@ -25,7 +25,6 @@ describe("resolveModel", () => {
       resolveModel({
         STAGEHAND_MODEL: "google/gemini-3.5-flash",
         GEMINI_API_KEY: "g-key",
-        CLAUDE_API_KEY: "c-key",
       })
     ).toEqual({
       model: { modelName: "google/gemini-3.5-flash", apiKey: "g-key" },
@@ -46,12 +45,20 @@ describe("resolveModel", () => {
   // Without its key, a model only fails mid-run with "API key not valid".
   it("names the missing key instead of starting without it", () => {
     expect(() => resolveModel({})).toThrow("GEMINI_API_KEY is not set")
-    expect(() =>
-      resolveModel({ STAGEHAND_MODEL: "anthropic/claude-opus-4-8" })
-    ).toThrow("CLAUDE_API_KEY is not set")
   })
 
-  it("refuses a provider it has no key for", () => {
+  // Only providers this project can pay for are wired up, and it pays for
+  // none — so Google's free tier and a local Ollama are the whole list. A
+  // paid provider left reachable is a stray STAGEHAND_MODEL away from
+  // spending, even with its key sitting in the environment.
+  it("refuses a provider it has no key for, even with a key present", () => {
+    expect(() =>
+      resolveModel({
+        STAGEHAND_MODEL: "anthropic/claude-opus-4-8",
+        CLAUDE_API_KEY: "c-key",
+      })
+    ).toThrow('No API key is set up for "anthropic" models')
+
     expect(() =>
       resolveModel({ STAGEHAND_MODEL: "openai/gpt-5", OPENAI_API_KEY: "o" })
     ).toThrow('No API key is set up for "openai" models')

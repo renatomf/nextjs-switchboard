@@ -2,9 +2,14 @@
 // STAGEHAND_MODEL ("provider/model"). Pure: the task hands it process.env.
 
 // The variable that holds the key for each provider's models.
+//
+// Google only, on purpose. This project runs on free tiers and has no credit
+// anywhere else, so a provider it cannot pay for has no business being
+// reachable: leaving one wired up means a stray STAGEHAND_MODEL starts
+// spending. A provider that is not in here is refused by name, before a
+// session opens. Adding one back is this line plus its key.
 const KEY_BY_PROVIDER: Record<string, string> = {
   google: "GEMINI_API_KEY",
-  anthropic: "CLAUDE_API_KEY",
 }
 
 // Providers that run on this machine. Browserbase's hosted Stagehand API calls
@@ -13,10 +18,8 @@ const KEY_BY_PROVIDER: Record<string, string> = {
 // where the worker runs next to them, which is `trigger dev`, not a deploy.
 const LOCAL_PROVIDERS = new Set(["ollama"])
 
-// A free model, because nothing here is meant to spend money by default. The
-// Claude models this used to default to are paid, and this project has no
-// credit for them: an unset STAGEHAND_MODEL would have failed every run, and
-// failed obscurely — the key resolves, the request is refused later.
+// A free model, because nothing here is meant to spend money by default, and
+// now because it is the only hosted provider wired up at all.
 //
 // Flash 3.8 rather than 3.5: newer, and 3.5 was seen overloaded here ("This
 // model is currently experiencing high demand"), with the Agent giving up
