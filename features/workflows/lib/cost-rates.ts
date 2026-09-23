@@ -8,15 +8,25 @@ import type { Rates } from "./run-cost"
 // Every number carries where it came from. A rate without a source is a guess
 // that looks like a fact six months later.
 
-// Browserbase, Developer plan: 100 browser hours included, then this per hour.
-// https://www.browserbase.com/pricing — checked 2026-09-22.
+// Browserbase, Free plan: one browser hour a month, and no overage rate —
+// past the hour it refuses rather than charges.
+// https://www.browserbase.com/pricing — checked 2026-09-23.
 //
-// This is the overage rate, so it prices the marginal run, not the included
-// ones. Good enough for "what did this week cost to run" and wrong for "what
-// is the invoice" — the invoice is the plan fee until the included hours run
-// out. Worth revisiting if usage ever approaches 100 hours a month; at the
-// current rate of a few minutes a week it is nowhere near.
-const BROWSER_HOUR_USD = 0.12
+// So a browser hour costs nothing here, and the honest rate is zero. This
+// said $0.12 for a day, which is the Developer plan's overage; that was the
+// wrong plan, and it would have reported a few cents of spend that never
+// existed.
+//
+// What the zero hides is the real constraint. Money is not what limits this
+// platform — the quota is, and it is shared: development and production run
+// through the same Browserbase key even though their databases are separate.
+// The hour ran out on 2026-09-23 and every run failed at once with
+// "Unknown error: 402", without opening a session.
+//
+// The number worth watching, then, is hours used against the monthly hour,
+// not dollars. Nothing computes it yet; summariseCost counts sessions but
+// reports only money.
+const BROWSER_HOUR_USD = 0
 
 // The models this project runs are all on free tiers, so their tokens cost
 // nothing. Recorded as an explicit zero rather than skipped, because zero is a
