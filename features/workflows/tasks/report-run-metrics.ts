@@ -1,6 +1,8 @@
 import { logger, schedules } from "@trigger.dev/sdk"
 
 import { listExecutionsSince } from "@/features/workflows/data"
+import { CURRENT_RATES } from "@/features/workflows/lib/cost-rates"
+import { summariseCost } from "@/features/workflows/lib/run-cost"
 import { summariseRuns } from "@/features/workflows/lib/run-metrics"
 
 // A week of runs, which is the window the report covers.
@@ -16,10 +18,10 @@ const WINDOW_DAYS = 7
 // waiting for 767 ms of work — reporting only `execution` would say those
 // seconds never happened.
 //
-// What this deliberately does not report is cost per execution — the roadmap
-// asks for it and nothing records it. A run opens a Browserbase session and
-// makes model calls, and neither duration nor token count reaches this
-// database. Reporting a guess would be worse than reporting nothing.
+// Cost rides along now that the quantities are recorded. Priced from
+// CURRENT_RATES, where every model in use is on a free tier, so the money is
+// effectively all Browserbase: the token counts are reported for how close
+// they run to a free tier's quota, not for what they cost.
 export const reportRunMetricsTask = schedules.task({
   id: "report-run-metrics",
   cron: "0 9 * * 1",
@@ -32,17 +34,21 @@ export const reportRunMetricsTask = schedules.task({
       payload.timestamp.getTime() - WINDOW_DAYS * 24 * 60 * 60 * 1000
     )
 
-    const metrics = summariseRuns(await listExecutionsSince(since))
+    const executions = await listExecutionsSince(since)
+
+    const metrics = summariseRuns(executions)
+    const cost = summariseCost(executions, CURRENT_RATES)
 
     // One wide event rather than a metric per line: everything worth
     // correlating about the week is knowable at once, and a rate is only
     // readable next to the count it came from.
     logger.log("Run metrics for the week", {
       ...metrics,
+      cost,
       since: since.toISOString(),
       windowDays: WINDOW_DAYS,
     })
 
-    return metrics
+    return { ...metrics, cost }
   },
 })

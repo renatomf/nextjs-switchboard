@@ -214,6 +214,13 @@ export function listExecutionsSince(since: Date) {
       createdAt: executions.createdAt,
       startedAt: executions.startedAt,
       finishedAt: executions.finishedAt,
+      // What the run consumed, for the cost half of the report. Null on a run
+      // that recorded nothing, which the summary counts rather than prices.
+      sessionSeconds: executions.sessionSeconds,
+      promptTokens: executions.promptTokens,
+      completionTokens: executions.completionTokens,
+      reasoningTokens: executions.reasoningTokens,
+      cachedInputTokens: executions.cachedInputTokens,
     })
     .from(executions)
     .where(gte(executions.createdAt, since))
