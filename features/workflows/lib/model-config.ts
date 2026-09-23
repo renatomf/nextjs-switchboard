@@ -13,10 +13,17 @@ const KEY_BY_PROVIDER: Record<string, string> = {
 // where the worker runs next to them, which is `trigger dev`, not a deploy.
 const LOCAL_PROVIDERS = new Set(["ollama"])
 
-// Claude: the model the Agent last completed runs with, end to end. Gemini is
-// one STAGEHAND_MODEL away; when it was tried, gemini-3.5-flash was overloaded
-// ("This model is currently experiencing high demand").
-export const DEFAULT_MODEL = "anthropic/claude-opus-4-8"
+// A free model, because nothing here is meant to spend money by default. The
+// Claude models this used to default to are paid, and this project has no
+// credit for them: an unset STAGEHAND_MODEL would have failed every run, and
+// failed obscurely — the key resolves, the request is refused later.
+//
+// Flash 3.8 rather than 3.5: newer, and 3.5 was seen overloaded here ("This
+// model is currently experiencing high demand"), with the Agent giving up
+// after 209s — close to the Browserbase session's five-minute limit.
+//
+// Claude remains one STAGEHAND_MODEL away for anyone who does have credit.
+export const DEFAULT_MODEL = "google/gemini-3.8-flash"
 
 export function resolveModel(env: Record<string, string | undefined>) {
   const modelName = env.STAGEHAND_MODEL || DEFAULT_MODEL

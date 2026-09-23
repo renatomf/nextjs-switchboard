@@ -3,17 +3,20 @@ import { describe, expect, it } from "vitest"
 import { DEFAULT_MODEL, resolveModel } from "./model-config"
 
 describe("resolveModel", () => {
-  it("runs Claude with CLAUDE_API_KEY when no model is set", () => {
-    expect(resolveModel({ CLAUDE_API_KEY: "c-key" })).toEqual({
-      model: { modelName: DEFAULT_MODEL, apiKey: "c-key" },
+  // The default has to be a model that costs nothing to run. A paid default
+  // spends money the moment someone forgets the variable, and this project
+  // has no credit for one — every run would fail, and fail late.
+  it("runs Gemini with GEMINI_API_KEY when no model is set", () => {
+    expect(resolveModel({ GEMINI_API_KEY: "g-key" })).toEqual({
+      model: { modelName: DEFAULT_MODEL, apiKey: "g-key" },
       disableAPI: false,
     })
-    expect(DEFAULT_MODEL).toMatch(/^anthropic\//)
+    expect(DEFAULT_MODEL).toMatch(/^google\//)
   })
 
   it("treats an empty STAGEHAND_MODEL as unset", () => {
     expect(
-      resolveModel({ STAGEHAND_MODEL: "", CLAUDE_API_KEY: "c-key" })
+      resolveModel({ STAGEHAND_MODEL: "", GEMINI_API_KEY: "g-key" })
     ).toMatchObject({ model: { modelName: DEFAULT_MODEL } })
   })
 
@@ -42,10 +45,10 @@ describe("resolveModel", () => {
 
   // Without its key, a model only fails mid-run with "API key not valid".
   it("names the missing key instead of starting without it", () => {
-    expect(() => resolveModel({})).toThrow("CLAUDE_API_KEY is not set")
+    expect(() => resolveModel({})).toThrow("GEMINI_API_KEY is not set")
     expect(() =>
-      resolveModel({ STAGEHAND_MODEL: "google/gemini-3.5-flash" })
-    ).toThrow("GEMINI_API_KEY is not set")
+      resolveModel({ STAGEHAND_MODEL: "anthropic/claude-opus-4-8" })
+    ).toThrow("CLAUDE_API_KEY is not set")
   })
 
   it("refuses a provider it has no key for", () => {
