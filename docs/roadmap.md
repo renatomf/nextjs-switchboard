@@ -115,10 +115,14 @@ As decisões ficam em [`docs/adr/`](adr/).
       passam a pertencer à integração — defini-las à mão na Vercel as sobrescreveria
 - [x] E2E com Playwright + Clerk testing: login programático pelo backend do Clerk, organização de
       teste ativada pelo cliente do Clerk (e não pelo menu dele, cujo DOM não é contrato nosso), e
-      estado de sessão salvo uma vez. Roda no CI a cada preview, atravessando a proteção da Vercel
-      por cabeçalho de bypass
+      estado de sessão salvo uma vez. Atravessa a proteção da Vercel por cabeçalho de bypass.
+      **A suíte está escrita e verde, mas hoje não roda:** ela dispara em `deployment_status`, e a
+      Vercel parou de criar o Deployment no GitHub (ver achados). Esta linha dizia "roda no CI a
+      cada preview" — dizia errado, e é o tipo de engano que custa mais que a lacuna, porque os
+      itens de E2E abaixo foram planejados supondo que rodava
 - [ ] Executor fake para o E2E: os testes cobrem login, dashboard e criar/apagar workflow, mas não
-      **executar** um. Rodar de verdade no CI abriria navegador e chamaria modelo a cada PR
+      **executar** um. Rodar de verdade no CI abriria navegador e chamaria modelo a cada PR.
+      Depende de a suíte voltar a rodar — ampliar cobertura que não executa não compra nada
 - [ ] Deploy de produção real (Clerk de produção, domínio na Resend, chave própria do modelo)
 - [x] Métricas: taxa de sucesso e percentis de duração, calculados em `run-metrics.ts` e
       relatados semanalmente por uma task agendada. O cancelamento fica fora do denominador — é
@@ -268,3 +272,6 @@ bloco `current gaps` do arquivo de teste correspondente.
 | Existem **duas produções no ar** apontando para a mesma branch `main` do Neon: a da Railway e a da Vercel. Nada quebra — mas a URL do webhook que está em uso é a da Railway, e os agendamentos não distinguem uma da outra | Railway, Vercel | 🟡 | Escolher uma e aposentar a outra, com a mesma sequência do domínio: subir, testar, migrar quem chama, desligar |
 | A integração do Neon define as URLs do banco com `sslmode=require`, e não `verify-full` — a conexão é criptografada, mas o certificado e o host não são validados. As variáveis pertencem à integração, então editá-las à mão é sobrescrito no próximo deploy | Vercel, integração Neon | 🟡 | Decidir no deploy de produção real: aceitar o `require` gerido pela integração, ou variáveis próprias e abrir mão do banco por preview |
 | Branches de preview no Trigger.dev exigem plano pago (Free = 0). Sem elas, o escopo Preview da Vercel aponta para o ambiente de **produção** do Trigger — uma run disparada de um preview criaria a versão no banco do preview e o worker de produção a procuraria no banco de produção | Trigger.dev, Vercel | 🟡 | Aceito: falha de forma ruidosa e inofensiva (`Workflow version ... not found`), e os testes E2E não executam workflows. Resolver exige plano pago mais `TRIGGER_PREVIEW_BRANCH` por deploy |
+| A integração Vercel↔GitHub parou de reportar: a Vercel constrói e publica (`Build Completed`, `Deployment completed`, domínios servindo), mas o status do commit fica `pending` para sempre e **nenhum Deployment é criado no GitHub**. Como o `e2e.yml` dispara em `deployment_status`, o E2E não roda em preview nenhum — e o painel da Vercel marca a entrega como "Checks Failed". Visto no PR #57 e repetido após redeploy; confirmado por zero deployments na API do GitHub, status congelado, e nenhuma branch `preview/feat/custo-por-execucao` no Neon | Vercel, GitHub | 🟠 | O CI do GitHub (lint, typecheck, test, build) segue verde e não depende disso. Investigar em `Settings → Git` do projeto na Vercel; reconectar a integração é o próximo passo |
+| Cinco branches `preview/*` órfãs no Neon (`docs/env-example`, `ci/e2e-against-preview`, `docs/registrar-triagem`, `docs/roadmap-fase-e`, `feat/log-database-endpoint`), todas idle. A linha "Preview por PR" acima afirma que a integração as apaga quando a branch do Git some, e pelo menos a de `docs/registrar-triagem` já foi mergeada. Mesmo tronco do achado acima | Neon, Vercel | 🟡 | Compute e armazenamento parados. Apagar à mão e conferir se voltam a ser limpas depois de reconectar a integração |
+| O worker do Trigger.dev **não é publicado por nenhum workflow**: `trigger:deploy` é manual. Um merge que muda código de task não chega à produção sozinho — o banco recebe a migration e o worker continua o antigo. Sentido na `0009`, cujas colunas ficaram vazias até o worker ser publicado | `.github/workflows/`, `trigger.config.ts` | 🟡 | Saber que existe. Publicar o worker faz parte de mergear mudança de task, e vale automatizar quando houver mais de uma pessoa |
