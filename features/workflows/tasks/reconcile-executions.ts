@@ -15,7 +15,12 @@ import { collectSessionCosts } from "@/features/workflows/tasks/session-cost-col
 // rather than waiting another fifteen minutes.
 export const reconcileExecutionsTask = schedules.task({
   id: "reconcile-executions",
-  cron: "*/15 * * * *",
+  // No schedule while the project is idle. `cron` is optional on
+  // schedules.task, and declarative schedules sync on deploy, so removing it
+  // and deploying takes the schedule down; the task itself stays defined and
+  // can still be triggered by hand from the dashboard.
+  //
+  // To bring it back: cron: "*/15 * * * *".
   // One sweep at a time: a slow one finishes before the next begins, instead
   // of two checking the same rows.
   queue: { concurrencyLimit: 1 },

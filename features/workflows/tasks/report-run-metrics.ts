@@ -24,7 +24,11 @@ const WINDOW_DAYS = 7
 // they run to a free tier's quota, not for what they cost.
 export const reportRunMetricsTask = schedules.task({
   id: "report-run-metrics",
-  cron: "0 9 * * 1",
+  // No schedule while the project is idle — same reasoning as the sweep beside
+  // it. Nothing is lost by not reporting: the numbers are computed from rows
+  // that stay in the table, so a later run covers whatever window it is given.
+  //
+  // To bring it back: cron: "0 9 * * 1".
   queue: { concurrencyLimit: 1 },
   // Nothing depends on this arriving; next week's report is the retry.
   retry: { maxAttempts: 1 },
