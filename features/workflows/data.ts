@@ -381,8 +381,18 @@ export async function saveWorkflowSchedule(
         active: true,
         updatedAt: new Date(),
       },
+      // The conflict target is the workflow, not the org, so without this an
+      // org could overwrite another's schedule by naming its workflow id. The
+      // action above proves ownership first and nothing reaches here without
+      // it — this is so that staying safe does not depend on remembering.
+      setWhere: eq(workflowSchedules.orgId, schedule.orgId),
     })
     .returning()
+
+  // The upsert writes nothing when the row belongs to another org, and then
+  // there is nothing to return. Loud, because a silent no-op here would read
+  // as success to every caller.
+  if (!saved) throw new Error("Workflow not found")
 
   return saved
 }
@@ -480,8 +490,14 @@ export async function saveWorkflowWebhook(
     .onConflictDoUpdate({
       target: workflowWebhooks.workflowId,
       set: { secret, updatedAt: new Date() },
+      // Same guard as the schedule above, and it matters more here: without
+      // it, naming another org's workflow id would replace that org's webhook
+      // secret — locking out whoever holds the old one.
+      setWhere: eq(workflowWebhooks.orgId, webhook.orgId),
     })
     .returning()
+
+  if (!saved) throw new Error("Workflow not found")
 
   return saved
 }
